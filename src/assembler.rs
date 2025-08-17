@@ -1,9 +1,10 @@
 use crate::encoder::Encoder;
 use crate::mnemonic::Mnemonic;
 use crate::parse::{
+    parse_i,
+    take_string,
     strip_comment,
     split_at_space,
-    take_string
 };
 
 use std::path::Path;
@@ -121,6 +122,11 @@ pub fn handle_directive<'a>(
         b".ascii" => {
             let (str, _) = take_string(rest);
             asm.emit_str(&str[1..]);
+        }
+
+        b".byte" => {
+            let byte = parse_i::<u8>(rest)?;
+            asm.emit_byte(byte);
         }
 
         _ => bail_at!(path.display(), lineno, &format!("unknown directive {dir}"))
