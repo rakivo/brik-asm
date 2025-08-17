@@ -1,4 +1,5 @@
 #[derive(Clone, Copy, Debug)]
+#[clippy::allow(upper_case_acronyms)]
 pub enum Mnemonic {
     ECALL,
     LA,

@@ -114,7 +114,7 @@ pub fn parse_i<T: core::str::FromStr>(s: &str) -> anyhow::Result<T> {
         take_signed(s)
     };
     ensure_comma_or_end(rest)?;
-    Ok(tok.parse().map_err(|_| anyhow::anyhow!("bad number: {tok}"))?)
+    tok.parse().map_err(|_| anyhow::anyhow!("bad number: {tok}"))
 }
 
 pub fn parse_reg(s: &str) -> anyhow::Result<(Reg, &str)> {
@@ -131,6 +131,7 @@ pub fn parse_reg(s: &str) -> anyhow::Result<(Reg, &str)> {
         bail!("undefined register: {s}")
     };
 
+    #[allow(clippy::manual_strip)]
     let (reg_num, rest) = match first_byte {
         b'z' if s.starts_with("zero") => (0, &s[4..]),
         b'r' if s.starts_with("ra") => (1, &s[2..]),
