@@ -98,9 +98,8 @@ impl<'a> Encoder<'a> {
                 let (rd, rest) = parse_reg(operands)?;
                 let (imm, _rest) = self.try_parse_imm(rest)?;
                 match imm {
-                    Imm::Sym { sym, .. } => {
-                        // TODO: pass addend here
-                        self.emit_pcrel_load_addr(rd, sym);
+                    Imm::Sym { sym, addend } => {
+                        self.emit_pcrel_load_addr(rd, sym, addend);
                     }
                     Imm::Int(val) => {
                         let hi = (val + 0x800) >> 12;

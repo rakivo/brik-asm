@@ -10,7 +10,7 @@ ahash = { version = "0.8", default-features = false, features = ["std"] }
 smallvec = { version = "1.13", features = ["const_new"] }
 thiserror = "1.0"
 anyhow = "1.0"
-brik = { git = "https://github.com/rakivo/brik", rev = "0d13582", features = ["fancy-diagnostics"]}
+brik = { git = "https://github.com/rakivo/brik", rev = "688a155", features = ["fancy-diagnostics"]}
 
 [profile.release]
 opt-level = 3

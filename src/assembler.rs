@@ -10,6 +10,7 @@ use std::path::Path;
 
 use brik::object::write::{
     SectionId,
+    SymbolKind,
     SymbolScope,
     SectionKind,
     SymbolSection,
@@ -54,16 +55,18 @@ pub fn assemble_file<'a>(
                 // for now all symbols are global
                 sym.scope = SymbolScope::Linkage;
             } else {
-                let lbl_id = if let Some(lbl_id) = enc.get_label_id(name) {
+                if let Some(lbl_id) = enc.get_label_id(name) {
                     enc.place_label_here(lbl_id);
-                    lbl_id
+                    let sym_id = enc.get_label(lbl_id).sym;
+                    // for now all symbols are global
+                    enc.symbol_mut(sym_id).scope = SymbolScope::Linkage;
                 } else {
-                    enc.add_label_here(name)
-                };
-
-                // for now all symbols are global
-                let sym_id = enc.get_label(lbl_id).sym;
-                enc.symbol_mut(sym_id).scope = SymbolScope::Linkage;
+                    enc.add_label_here(
+                        name,
+                        SymbolKind::Text,
+                        SymbolScope::Linkage
+                    );
+                }
             }
 
             continue
