@@ -24,7 +24,6 @@ mod mnemonic;
 mod assembler;
 
 use encoder::Encoder;
-use assembler::{Sections, assemble_file};
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Single-pass RISC-V assembler")]
@@ -50,27 +49,18 @@ fn main() -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| default_out(&args.input).expect("output"));
 
-    let asm = Assembler::new(
+    let mut asm = Assembler::new(
         BinaryFormat::Elf,
         Arch::Riscv64,
         Endianness::Little,
         &args.isa,
     );
 
-    let mut encoder = Encoder(asm);
-
-    encoder.set_object_flags(FileFlags::Elf {
+    asm.set_object_flags(FileFlags::Elf {
         os_abi: 0,
         abi_version: 0,
         e_flags: 0x4,
     });
-
-    let sections = Sections {
-        rodata : encoder.add_rodata_section(),
-        text   : encoder.add_text_section(),
-        data   : encoder.add_data_section(),
-        bss    : encoder.add_bss_section(),
-    };
 
     let in_display  = args.input.display();
     let out_display = out_path.display();
@@ -78,10 +68,10 @@ fn main() -> anyhow::Result<()> {
     let src = fs::read_to_string(&args.input)
         .with_context(|| format!("reading {in_display}"))?;
 
-    let encoder = assemble_file(&args.input, &src, encoder, &sections)
-        .with_context(|| format!("assembling {in_display}"))?;
+    let asm = assembler::Assembler::new(Encoder(asm));
 
-    let obj = encoder.finish().unwrap();
+    let obj = asm.assemble_file(&args.input, &src)
+        .with_context(|| format!("assembling {in_display}"))?;
 
     let handle = fs::File::create(&out_path)?;
     if let Err(e) = obj.write_stream(&handle) {

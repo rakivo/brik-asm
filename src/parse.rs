@@ -19,7 +19,7 @@ pub fn split_at_space(s: &str) -> (&str, &str) {
 
 #[inline]
 pub fn strip_comment(mut s: &str) -> &str {
-    if let Some(idx) = s.bytes().position(|b| b == b';') {
+    if let Some(idx) = s.bytes().rposition(|b| b == b';') {
         s = &s[..idx]
     }
 
