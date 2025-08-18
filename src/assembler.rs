@@ -48,9 +48,10 @@ pub fn assemble_file<'a>(
             if let Some(sym_id) = enc.symbol_id(name.as_bytes()) {
                 let curr_offset = enc.curr_offset();
                 let curr_section = enc.expect_curr_section();
-                let sym = &mut enc.symbol_mut(sym_id);
-                sym.section = SymbolSection::Section(curr_section);
-                sym.value = curr_offset;
+                enc.edit_sym(sym_id, |s| {
+                    s.section = SymbolSection::Section(curr_section);
+                    s.value = curr_offset;
+                });
             }
 
             enc.place_or_add_label_here(

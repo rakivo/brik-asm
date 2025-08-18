@@ -83,6 +83,16 @@ impl<'a> Encoder<'a> {
     }
 
     #[inline]
+    pub fn edit_sym<R>(
+        &mut self,
+        sym_id: SymbolId,
+        f: impl FnOnce(&mut Symbol) -> R
+    ) -> R {
+        let sym = self.symbol_mut(sym_id);
+        f(sym)
+    }
+
+    #[inline]
     #[allow(unused)]
     pub fn edit_label_sym<R>(
         &mut self,
@@ -90,8 +100,7 @@ impl<'a> Encoder<'a> {
         f: impl FnOnce(&mut Symbol) -> R
     ) -> R {
         let sym_id = self.get_label(lbl_id).sym;
-        let sym = self.symbol_mut(sym_id);
-        f(sym)
+        self.edit_sym(sym_id, f)
     }
 
     #[inline]
@@ -100,9 +109,7 @@ impl<'a> Encoder<'a> {
         f: impl FnOnce(&mut Symbol) -> R
     ) -> R {
         let lbl_id = self.expect_curr_label();
-        let sym_id = self.get_label(lbl_id).sym;
-        let sym = self.symbol_mut(sym_id);
-        f(sym)
+        self.edit_label_sym(lbl_id, f)
     }
 
     #[inline]
