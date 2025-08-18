@@ -1,4 +1,5 @@
 .text
+.extern printf
 .global main
 main:
     addi  sp,   sp,  -16
@@ -8,11 +9,8 @@ main:
 
     addi  t0,   t0,   10
 
-    addi  a0,   zero,  1
-    addi  a7,   zero, 64
-    la    a1,   msg
-    addi  a2,   zero, 21
-    ecall
+    la    a0,   msg
+    call  printf
 
     ld    ra,   sp,    8
     ld    s0,   sp,    0
@@ -24,3 +22,4 @@ main:
 msg:
     .ascii "Hello from RISC-V!"
     .byte 10
+    .byte 0
