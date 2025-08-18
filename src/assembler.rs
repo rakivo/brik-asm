@@ -55,7 +55,7 @@ impl<'a> Assembler<'a> {
     pub fn assemble_file(
         mut self,
         path: &'a Path,
-        src: &'a str,
+        src: &str,
     ) -> anyhow::Result<Object<'a>> {
         self.enc.position_at_end(self.sections.text);
 
@@ -130,7 +130,7 @@ impl<'a> Assembler<'a> {
     fn handle_directive(
         &mut self,
         path: &'a Path,
-        line: &'a str
+        line: &str
     ) -> anyhow::Result<()> {
         let (dir, rest) = split_at_space(line);
 
@@ -189,7 +189,7 @@ impl<'a> Assembler<'a> {
 
             b".ascii" => {
                 let (str, _) = take_string(rest);
-                self.enc.emit_str(&str[1..]);
+                self.enc.emit_string(str[1..].to_owned());
                 self.enc.edit_curr_label_sym(|s| {
                     s.kind = SymbolKind::Data;
                 });
@@ -197,7 +197,7 @@ impl<'a> Assembler<'a> {
 
             b".asciiz" => {
                 let (str, _) = take_string(rest);
-                self.enc.emit_str(&str[1..]);
+                self.enc.emit_string(str[1..].to_owned());
                 self.enc.emit_byte(0);
                 self.enc.edit_curr_label_sym(|s| {
                     s.kind = SymbolKind::Data;

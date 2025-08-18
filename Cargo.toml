@@ -10,7 +10,13 @@ ahash = { version = "0.8", default-features = false, features = ["std"] }
 smallvec = { version = "1.13", features = ["const_new"] }
 thiserror = "1.0"
 anyhow = "1.0"
-brik = { git = "https://github.com/rakivo/brik", rev = "e24b193", features = ["fancy-diagnostics"]}
+memmap2 = { version = "=0.9.7",   default-features = false }
+brik = { git = "https://github.com/rakivo/brik", rev = "1fe3c5c", features = ["fancy-diagnostics"]}
+libc = { version = "0.2.175", optional = true } # madvise
+
+[features]
+default = ["madvise"]
+madvise = ["libc"]
 
 [profile.release]
 opt-level = 3
