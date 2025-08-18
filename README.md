@@ -11,6 +11,7 @@ RISC-V Assembler built using [`brik`](https://github.com/rakivo/brik) library
 
 ```asm
 .text
+.global main
 main:
     addi  sp,   sp,  -16
     sd    ra,   sp,    8
