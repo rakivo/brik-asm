@@ -9,6 +9,15 @@
 
 RISC-V Assembler built using [`brik`](https://github.com/rakivo/brik) library
 
+## Quick start
+```console
+$ cargo r -r -- ./examples/test.s
+$ clang -o test test.o
+$ ./test
+```
+
+---
+
 ```asm
 .text
 .global main
