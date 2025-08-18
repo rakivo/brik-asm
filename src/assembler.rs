@@ -39,7 +39,6 @@ pub fn assemble_file<'a>(
         let line = line.trim();
         if line.is_empty() { continue }
 
-        // label?
         if let Some(lbl) = line.strip_suffix(':') {
             let name = lbl.trim();
             if name.is_empty() {
@@ -115,6 +114,15 @@ pub fn handle_directive<'a>(
                     SectionKind::Data
                 )
             }
+        }
+
+        b".extern" | b".extrn" => {
+            let name = get_name()?;
+            asm.add_symbol_extern(
+                name,
+                SymbolKind::Text,
+                SymbolScope::Dynamic
+            );
         }
 
         b".global" | b".globl" => {
