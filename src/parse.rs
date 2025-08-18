@@ -1,39 +1,63 @@
 use brik::rv32::Reg;
 
 use anyhow::bail;
-use memchr::memchr;
+use memchr::{memchr, memchr2};
+
+#[inline]
+pub fn skip_whitespace(s: &str) -> usize {
+    let bytes = s.as_bytes();
+
+    let mut i = 0;
+
+    // skip initial whitespace
+    while i < bytes.len() && matches!{
+        bytes[i], b' ' | b'\t' | b'\r' | b'\n'
+    } {
+        i += 1
+    }
+
+    i
+}
 
 #[inline]
 pub fn split_at_space(s: &str) -> (&str, &str) {
-    let bytes = s.as_bytes();
-    if let Some(i) = memchr(b' ', bytes) {
+    if let Some(i) = memchr2(b' ', b'\t', s.as_bytes()) {
         let (a, b) = s.split_at(i);
-        (a, b.trim_start())
-    } else if let Some(i) = memchr(b'\t', bytes) {
-        let (a, b) = s.split_at(i);
-        (a, b.trim_start())
+        (a, &b[skip_whitespace(b)..])
     } else {
         (s, "")
     }
 }
 
 #[inline]
-pub fn strip_comment(mut s: &str) -> &str {
+pub fn strip_comment(s: &str) -> &str {
     if let Some(idx) = s.bytes().rposition(|b| b == b';') {
-        s = &s[..idx]
+        &s[..idx]
+    } else {
+        s
     }
-
-    s
 }
 
 #[inline]
 pub fn take_number(s: &str) -> (&str, &str) {
     let bytes = s.as_bytes();
     let mut i = 0;
+
     if matches!(bytes.first(), Some(b'+') | Some(b'-')) { i += 1 }
+
+    while i + 4 <= bytes.len() {
+        let chunk = [bytes[i], bytes[i+1], bytes[i+2], bytes[i+3]];
+        if chunk.iter().all(|b| b.is_ascii_digit()) {
+            i += 4
+        } else {
+            break
+        }
+    }
+
     while i < bytes.len() && bytes[i].is_ascii_digit() {
         i += 1
     }
+
     (&s[..i], &s[i..])
 }
 
@@ -72,26 +96,43 @@ pub fn take_signed(s: &str) -> (&str, &str) {
 #[inline]
 pub fn take_string(s: &str) -> (&str, &str) {
     let bytes = s.as_bytes();
-    let mut i = 1;
-    while i < bytes.len() && bytes[i] != b'"' {
-        i += 1
+    if bytes.is_empty() || bytes[0] != b'"' {
+        return (s, "")
     }
-    (&s[..i], &s[i..])
+
+    if let Some(end) = memchr(b'"', &bytes[1..]) {
+        let total_len = end + 2;
+        (&s[..total_len], &s[total_len..])
+    } else {
+        (s, "")
+    }
 }
 
 #[inline]
 pub fn ensure_comma_or_end(s: &str) -> anyhow::Result<()> {
-    let st = s.trim_start();
-    if st.is_empty() || st.as_bytes()[0] == b',' {
+    let i = skip_whitespace(s);
+    let bytes = s.as_bytes();
+
+    if i >= bytes.len() || bytes[i] == b',' {
         Ok(())
     } else {
-        bail!("expected ',' or end, got: {s}")
+        bail!("expected ',' or end, got: {got}", got = &s[i..])
     }
 }
 
 #[inline]
 pub fn trim_next(s: &str) -> &str {
-    s.trim_start().strip_prefix(',').map(|x| x.trim_start()).unwrap_or(s.trim_start())
+    let bytes = s.as_bytes();
+
+    let mut i = skip_whitespace(s);
+
+    // skip comma if present
+    if i < bytes.len() && bytes[i] == b',' {
+        i += 1;
+        i += skip_whitespace(&s[i..]);
+    }
+
+    &s[i..]
 }
 
 #[inline]
@@ -107,7 +148,7 @@ pub fn parse_u8(s: &str) -> anyhow::Result<u8> { parse_i::<u8>(s) }
 
 #[inline]
 pub fn parse_i<T: core::str::FromStr>(s: &str) -> anyhow::Result<T> {
-    let s = s.trim_start();
+    let s = &s[skip_whitespace(s)..];
     let (tok, rest) = if let Some(rs) = s.strip_prefix("0x") {
         take_hex(rs)
     } else {
@@ -118,52 +159,95 @@ pub fn parse_i<T: core::str::FromStr>(s: &str) -> anyhow::Result<T> {
 }
 
 pub fn parse_reg(s: &str) -> anyhow::Result<(Reg, &str)> {
-    let s = s.trim_start();
+    let s = &s[skip_whitespace(s)..];
+    let bytes = s.as_bytes();
 
-    if let Some(rest) = s.strip_prefix('x') {
-        let (num_str, rest) = take_number(rest);
+    if bytes.is_empty() {
+        bail!("undefined register: {s}");
+    }
+
+    // x?
+    if bytes[0] == b'x' && bytes.len() > 1 {
+        let (num_str, rest) = take_number(&s[1..]);
         let n = num_str.parse::<u8>()?;
         ensure_comma_or_end(rest)?;
         return Ok((Reg::from_u32(n as _), trim_next(rest)));
     }
 
-    let Some(first_byte) = s.as_bytes().first() else {
-        bail!("undefined register: {s}")
+    let (reg_num, consumed) = match (bytes[0], bytes.get(1), bytes.get(2)) {
+        (b'a', Some(b'0'), _) => (10, 2),  // a0 - return value/first arg
+        (b'a', Some(b'1'), _) => (11, 2),  // a1 - second arg
+        (b'r', Some(b'a'), _) => (1, 2),   // ra - return address
+        (b's', Some(b'p'), _) => (2, 2),   // sp - stack pointer
+        (b't', Some(b'0'), _) => (5, 2),   // t0 - temp register
+        (b's', Some(b'0'), _) => (8, 2),   // s0/fp - frame pointer
+        (b'a', Some(b'2'), _) => (12, 2),  // a2
+        (b'a', Some(b'3'), _) => (13, 2),  // a3
+        (b't', Some(b'1'), _) => (6, 2),   // t1
+        (b's', Some(b'1'), Some(b'0')) => (26, 3), // s10 (check 3-char first)
+        (b's', Some(b'1'), Some(b'1')) => (27, 3), // s11
+        (b's', Some(b'1'), _) => (9, 2),   // s1
+        (b'g', Some(b'p'), _) => (3, 2),   // gp
+        (b't', Some(b'p'), _) => (4, 2),   // tp
+        (b't', Some(b'2'), _) => (7, 2),   // t2
+        (b't', Some(b'3'), _) => (28, 2),  // t3
+        (b't', Some(b'4'), _) => (29, 2),  // t4
+        (b't', Some(b'5'), _) => (30, 2),  // t5
+        (b't', Some(b'6'), _) => (31, 2),  // t6
+        (b's', Some(b'2'), _) => (18, 2),  // s2
+        (b's', Some(b'3'), _) => (19, 2),  // s3
+        (b's', Some(b'4'), _) => (20, 2),  // s4
+        (b's', Some(b'5'), _) => (21, 2),  // s5
+        (b's', Some(b'6'), _) => (22, 2),  // s6
+        (b's', Some(b'7'), _) => (23, 2),  // s7
+        (b's', Some(b'8'), _) => (24, 2),  // s8
+        (b's', Some(b'9'), _) => (25, 2),  // s9
+        (b'a', Some(b'4'), _) => (14, 2),  // a4
+        (b'a', Some(b'5'), _) => (15, 2),  // a5
+        (b'a', Some(b'6'), _) => (16, 2),  // a6
+        (b'a', Some(b'7'), _) => (17, 2),  // a7
+        (b'f', Some(b'p'), _) => (8, 2),   // fp (alias)
+        (b'z', Some(b'e'), Some(b'r')) if bytes.len() >= 4 && &bytes[..4] == b"zero" => (0, 4),
+
+        _ => bail!("undefined register: {s}"),
     };
 
-    #[allow(clippy::manual_strip)]
-    let (reg_num, rest) = match first_byte {
-        b'z' if s.starts_with("zero") => (0, &s[4..]),
-        b'r' if s.starts_with("ra") => (1, &s[2..]),
-        b's' => {
-            if      s.starts_with("sp") { (2, &s[2..])   } else if s.starts_with("s0")  { (8, &s[2..])  }
-            else if s.starts_with("s1") { (9, &s[2..])   } else if s.starts_with("s2")  { (18, &s[2..]) }
-            else if s.starts_with("s3") { (19, &s[2..])  } else if s.starts_with("s4")  { (20, &s[2..]) }
-            else if s.starts_with("s5") { (21, &s[2..])  } else if s.starts_with("s6")  { (22, &s[2..]) }
-            else if s.starts_with("s7") { (23, &s[2..])  } else if s.starts_with("s8")  { (24, &s[2..]) }
-            else if s.starts_with("s9") { (25, &s[2..])  } else if s.starts_with("s10") { (26, &s[3..]) }
-            else if s.starts_with("s11") { (27, &s[3..]) } else { bail!("expected register, got: {s}") }
-        }
-        b't' => {
-            if      s.starts_with("tp") { (4, &s[2..])  } else if s.starts_with("t0") { (5, &s[2..])  }
-            else if s.starts_with("t1") { (6, &s[2..])  } else if s.starts_with("t2") { (7, &s[2..])  }
-            else if s.starts_with("t3") { (28, &s[2..]) } else if s.starts_with("t4") { (29, &s[2..]) }
-            else if s.starts_with("t5") { (30, &s[2..]) } else if s.starts_with("t6") { (31, &s[2..]) }
-            else { bail!("expected register, got: {s}") }
-        }
-        b'a' => {
-            if      s.starts_with("a0") { (10, &s[2..]) } else if s.starts_with("a1") { (11, &s[2..]) }
-            else if s.starts_with("a2") { (12, &s[2..]) } else if s.starts_with("a3") { (13, &s[2..]) }
-            else if s.starts_with("a4") { (14, &s[2..]) } else if s.starts_with("a5") { (15, &s[2..]) }
-            else if s.starts_with("a6") { (16, &s[2..]) } else if s.starts_with("a7") { (17, &s[2..]) }
-            else { bail!("expected register, got: {s}") }
-        }
-        b'f' if s.starts_with("fp") => (8, &s[2..]),
-        b'g' if s.starts_with("gp") => (3, &s[2..]),
-        _ => bail!("expected register, got: {s}"),
-    };
-
+    let rest = &s[consumed..];
     ensure_comma_or_end(rest)?;
 
     Ok((Reg::from_u32(reg_num), trim_next(rest)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_skip_whitespace() {
+        assert_eq!(skip_whitespace("  hello"), 2);
+        assert_eq!(skip_whitespace("\t\n hello"), 3);
+        assert_eq!(skip_whitespace("hello"), 0);
+    }
+
+    #[test]
+    fn test_take_number() {
+        assert_eq!(take_number("123abc"), ("123", "abc"));
+        assert_eq!(take_number("+456def"), ("+456", "def"));
+        assert_eq!(take_number("-789ghi"), ("-789", "ghi"));
+        assert_eq!(take_number("12345678901234"), ("12345678901234", ""));
+    }
+
+    #[test]
+    fn test_take_string() {
+        assert_eq!(take_string(r#""hello" world"#), (r#""hello""#, " world"));
+        assert_eq!(take_string(r#""unclosed"#), (r#""unclosed"#, ""));
+        assert_eq!(take_string("not a string"), ("not a string", ""));
+    }
+
+    #[test]
+    fn test_trim_next() {
+        assert_eq!(trim_next("  , hello"), "hello");
+        assert_eq!(trim_next(",world"), "world");
+        assert_eq!(trim_next("  no comma"), "no comma");
+    }
 }

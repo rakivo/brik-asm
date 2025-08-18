@@ -33,3 +33,11 @@ panic = "abort"
 strip = true
 lto = true
 codegen-units = 1
+
+[profile.profiling]
+inherits = "release"
+debug = 1
+lto = false
+codegen-units = 16
+overflow-checks = false
+

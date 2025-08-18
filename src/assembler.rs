@@ -147,19 +147,19 @@ impl<'a> Assembler<'a> {
             Ok(name)
         };
 
-        match dir.as_bytes() {
-            b".text"   => self.enc.position_at_end(self.sections.text),
-            b".data"   => self.enc.position_at_end(self.sections.data),
-            b".rodata" => self.enc.position_at_end(self.sections.rodata),
-            b".bss"    => self.enc.position_at_end(self.sections.bss),
+        match &dir.as_bytes()[1..] {
+            b"text"   => self.enc.position_at_end(self.sections.text),
+            b"data"   => self.enc.position_at_end(self.sections.data),
+            b"rodata" => self.enc.position_at_end(self.sections.rodata),
+            b"bss"    => self.enc.position_at_end(self.sections.bss),
 
-            b".section" => {
+            b"section" => {
                 let name = get_name()?;
                 match name.as_bytes() {
-                    b".text"   => self.enc.position_at_end(self.sections.text),
-                    b".data"   => self.enc.position_at_end(self.sections.data),
-                    b".rodata" => self.enc.position_at_end(self.sections.rodata),
-                    b".bss"    => self.enc.position_at_end(self.sections.bss),
+                    b"text"   => self.enc.position_at_end(self.sections.text),
+                    b"data"   => self.enc.position_at_end(self.sections.data),
+                    b"rodata" => self.enc.position_at_end(self.sections.rodata),
+                    b"bss"    => self.enc.position_at_end(self.sections.bss),
                     other      => _ = self.enc.add_section_at_end(
                         StandardSegment::Data,
                         other,
@@ -168,7 +168,7 @@ impl<'a> Assembler<'a> {
                 }
             }
 
-            b".extern" | b".extrn" => {
+            b"extern" | b"extrn" => {
                 let name = get_name()?;
                 self.enc.add_symbol_extern(
                     name,
@@ -177,7 +177,7 @@ impl<'a> Assembler<'a> {
                 );
             }
 
-            b".global" | b".globl" => {
+            b"global" | b"globl" => {
                 let name = get_name()?;
                 let lbl_id = self.enc.get_or_declare_label(
                     name,
@@ -187,7 +187,7 @@ impl<'a> Assembler<'a> {
                 self.enc.make_label_global(lbl_id);
             }
 
-            b".ascii" => {
+            b"ascii" => {
                 let (str, _) = take_string(rest);
                 self.enc.emit_string(str[1..].to_owned());
                 self.enc.edit_curr_label_sym(|s| {
@@ -195,7 +195,7 @@ impl<'a> Assembler<'a> {
                 });
             }
 
-            b".asciiz" => {
+            b"asciiz" => {
                 let (str, _) = take_string(rest);
                 self.enc.emit_string(str[1..].to_owned());
                 self.enc.emit_byte(0);
@@ -204,7 +204,7 @@ impl<'a> Assembler<'a> {
                 });
             }
 
-            b".byte" => {
+            b"byte" => {
                 let byte = parse_i::<u8>(rest)?;
                 self.enc.emit_byte(byte);
                 self.enc.edit_curr_label_sym(|s| {
