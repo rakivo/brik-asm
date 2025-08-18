@@ -1,5 +1,4 @@
 // TODO(#2): Properly manage symbol sizes
-// TODO(#1): External symbols
 
 use std::fs;
 use std::path::{Path, PathBuf};
