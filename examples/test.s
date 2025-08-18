@@ -7,8 +7,6 @@ main:
     sd    s0,   sp,    0
     addi  s0,   sp,   16
 
-    addi  t0,   t0,   10
-
     la    a0,   msg
     call  printf
 
