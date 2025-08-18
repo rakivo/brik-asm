@@ -9,7 +9,7 @@ pub fn split_at_space(s: &str) -> (&str, &str) {
     if let Some(i) = memchr(b' ', bytes) {
         let (a, b) = s.split_at(i);
         (a, b.trim_start())
-    } else if let Some(i) = bytes.iter().position(|&c| matches!(c, b'\t')) {
+    } else if let Some(i) = memchr(b'\t', bytes) {
         let (a, b) = s.split_at(i);
         (a, b.trim_start())
     } else {

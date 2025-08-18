@@ -1,6 +1,7 @@
 #[derive(Clone, Copy, Debug)]
 #[clippy::allow(upper_case_acronyms)]
 pub enum Mnemonic {
+    CALL,
     ECALL,
     LA,
     ADDI,
@@ -42,6 +43,7 @@ impl Mnemonic {
             b"jal" => JAL,
             b"jalr" => JALR,
             b"andi" => ANDI,
+            b"call" => CALL,
             b"ori" => ORI,
             b"xori" => XORI,
             b"slli" => SLLI,

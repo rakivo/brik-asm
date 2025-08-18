@@ -12,6 +12,7 @@ use crate::parse::{
 use std::ops::{Deref, DerefMut};
 
 use brik::rv32::I32;
+use brik::rv32::Reg::*;
 use brik::asm::Assembler;
 use brik::asm::label::LabelId;
 use brik::asm::errors::FinishError;
@@ -183,6 +184,27 @@ impl<'a> Encoder<'a> {
                 let (rd, rest) = parse_reg(operands)?;
                 let (imm, _rest) = self.try_parse_imm(rest)?;
                 maybe_reloc!(self, AUIPC, rd=rd, imm=imm, kind=RelocKind::PcrelHi20);
+            }
+            CALL => {
+                if let Ok((s, _)) = parse_reg(operands) {
+                    self.emit_bytes(
+                        I32::JALR { d: RA, s, im: 0 }
+                    );
+                } else {
+                    let (imm, _rest) = self.try_parse_imm(operands)?;
+                    match imm {
+                        Imm::Int(val) => {
+                            let rd = T0;
+                            self.emit_li(rd, val);
+                            self.emit_bytes(
+                                I32::JALR { d: RA, s: rd, im: 0 }
+                            );
+                        }
+                        Imm::Sym { sym, .. } => {
+                            self.emit_call_plt(sym);
+                        }
+                    }
+                }
             }
             JAL => {
                 let (rd, rest) = parse_reg(operands)?;
