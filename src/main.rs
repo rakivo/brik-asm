@@ -1,3 +1,5 @@
+// TODO: Properly manage symbol sizes
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -23,19 +25,19 @@ mod assembler;
 use encoder::Encoder;
 use assembler::{Sections, assemble_file};
 
-#[derive(Parser, Debug)]
-#[command(version, about = "Single-pass RISC-V assembler (sections, labels, mnemonics)")]
+#[derive(Debug, Parser)]
+#[command(version, about = "Single-pass RISC-V assembler")]
 struct Args {
     /// Input assembly file (UTF-8)
     #[arg(required = true)]
     input: PathBuf,
 
-    /// Output file (ELF relocatable by default)
+    /// Output object file
     #[arg(short, long)]
     out: Option<PathBuf>,
 
-    /// Target ISA (brik uses this to bake .riscv.attributes). Default: rv32i
-    #[arg(long, default_value = "rv32i")]
+    /// Target ISA (brik uses this to bake .riscv.attributes)
+    #[arg(long, default_value = "rv64gc")]
     isa: String,
 }
 
@@ -69,20 +71,23 @@ fn main() -> anyhow::Result<()> {
         bss    : encoder.add_bss_section(),
     };
 
-    let display = out_path.display();
+    let in_display  = args.input.display();
+    let out_display = out_path.display();
 
     let src = fs::read_to_string(&args.input)
-        .with_context(|| format!("reading {display}"))?;
+        .with_context(|| format!("reading {in_display}"))?;
 
     let encoder = assemble_file(&args.input, &src, encoder, &sections)
-        .with_context(|| format!("assembling {display}"))?;
+        .with_context(|| format!("assembling {in_display}"))?;
 
     let obj = encoder.finish().unwrap();
 
     let handle = fs::File::create(&out_path)?;
     if let Err(e) = obj.write_stream(&handle) {
-        eprintln!("couldn't write to {display}: {e}")
+        eprintln!("couldn't write to {out_display}: {e}")
     }
+
+    println!("[wrote object file to {out_display}]");
 
     Ok(())
 }
