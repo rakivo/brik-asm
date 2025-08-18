@@ -108,7 +108,7 @@ impl<'a> Encoder<'a> {
     pub fn make_label_global(&mut self, lbl_id: LabelId) {
         let sym_id = self.get_label(lbl_id).sym;
         let sym = self.symbol_mut(sym_id);
-        sym.scope = SymbolScope::Linkage;
+        sym.scope = SymbolScope::Dynamic;
     }
 
     #[inline]
