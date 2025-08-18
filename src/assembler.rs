@@ -52,21 +52,13 @@ pub fn assemble_file<'a>(
                 let sym = &mut enc.symbol_mut(sym_id);
                 sym.section = SymbolSection::Section(curr_section);
                 sym.value = curr_offset;
-
-                // for now all symbols are global
-                sym.scope = SymbolScope::Linkage;
-            } else if let Some(lbl_id) = enc.get_label_id(name) {
-                enc.place_label_here(lbl_id);
-                let sym_id = enc.get_label(lbl_id).sym;
-                // for now all symbols are global
-                enc.symbol_mut(sym_id).scope = SymbolScope::Linkage;
-            } else {
-                enc.add_label_here(
-                    name,
-                    SymbolKind::Text,
-                    SymbolScope::Linkage
-                );
             }
+
+            enc.place_or_add_label_here(
+                name,
+                SymbolKind::Text,
+                SymbolScope::Compilation
+            );
 
             continue
         }
@@ -94,6 +86,16 @@ pub fn handle_directive<'a>(
     sect: &Sections,
 ) -> anyhow::Result<()> {
     let (dir, rest) = split_at_space(line);
+
+    let get_name = || {
+        let name = rest.trim();
+        if name.is_empty() {
+            bail_at!(path.display(), lineno, "expected section name")
+        }
+
+        Ok(name)
+    };
+
     match dir.as_bytes() {
         b".text"   => asm.position_at_end(sect.text),
         b".data"   => asm.position_at_end(sect.data),
@@ -101,11 +103,7 @@ pub fn handle_directive<'a>(
         b".bss"    => asm.position_at_end(sect.bss),
 
         b".section" => {
-            let name = rest.trim();
-            if name.is_empty() {
-                bail_at!(path.display(), lineno, "expected section name")
-            }
-
+            let name = get_name()?;
             match name.as_bytes() {
                 b".text"   => asm.position_at_end(sect.text),
                 b".data"   => asm.position_at_end(sect.data),
@@ -119,17 +117,35 @@ pub fn handle_directive<'a>(
             }
         }
 
+        b".global" | b".globl" => {
+            let name = get_name()?;
+            let lbl_id = asm.get_or_declare_label(
+                name,
+                SymbolKind::Text,
+                SymbolScope::Compilation
+            );
+            asm.make_label_global(lbl_id);
+        }
+
         b".ascii" => {
             let (str, _) = take_string(rest);
             asm.emit_str(&str[1..]);
+            asm.edit_curr_label_sym(|s| {
+                s.kind = SymbolKind::Data;
+                // s.scope = SymbolScope::Linkage;
+            });
         }
 
         b".byte" => {
             let byte = parse_i::<u8>(rest)?;
             asm.emit_byte(byte);
+            asm.edit_curr_label_sym(|s| {
+                s.kind = SymbolKind::Data;
+                // s.scope = SymbolScope::Linkage;
+            });
         }
 
-        _ => bail_at!(path.display(), lineno, &format!("unknown directive {dir}"))
+        _ => bail_at!(path.display(), lineno, "unknown directive {dir}")
     }
 
     Ok(())

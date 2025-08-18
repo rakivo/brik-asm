@@ -13,9 +13,10 @@ use std::ops::{Deref, DerefMut};
 
 use brik::rv32::I32;
 use brik::asm::Assembler;
+use brik::asm::label::LabelId;
 use brik::asm::errors::FinishError;
 use brik::object::{SymbolKind, SymbolScope};
-use brik::object::write::{Object, SymbolId};
+use brik::object::write::{Object, Symbol, SymbolId};
 
 use anyhow::{bail, Result};
 
@@ -49,6 +50,75 @@ impl<'a> Encoder<'a> {
     #[inline(always)]
     pub fn finish(self) -> Result<Object<'a>, FinishError> {
         self.0.finish()
+    }
+
+    #[inline]
+    pub fn place_or_add_label_here(
+        &mut self,
+        name: impl AsRef<[u8]>,
+        kind: SymbolKind,
+        scope: SymbolScope
+    ) -> LabelId {
+        if let Some(lbl_id) = self.get_label_id(&name) {
+            self.place_label_here(lbl_id);
+            lbl_id
+        } else {
+            self.add_label_here(name, kind, scope)
+        }
+    }
+
+    #[inline]
+    pub fn get_or_declare_label(
+        &mut self,
+        name: impl AsRef<[u8]>,
+        kind: SymbolKind,
+        scope: SymbolScope
+    ) -> LabelId {
+        if let Some(lbl_id) = self.get_label_id(&name) {
+            lbl_id
+        } else {
+            self.declare_label(name, kind, scope)
+        }
+    }
+
+    #[inline]
+    #[allow(unused)]
+    pub fn edit_label_sym<R>(
+        &mut self,
+        lbl_id: LabelId,
+        f: impl FnOnce(&mut Symbol) -> R
+    ) -> R {
+        let sym_id = self.get_label(lbl_id).sym;
+        let sym = self.symbol_mut(sym_id);
+        f(sym)
+    }
+
+    #[inline]
+    pub fn edit_curr_label_sym<R>(
+        &mut self,
+        f: impl FnOnce(&mut Symbol) -> R
+    ) -> R {
+        let lbl_id = self.expect_curr_label();
+        let sym_id = self.get_label(lbl_id).sym;
+        let sym = self.symbol_mut(sym_id);
+        f(sym)
+    }
+
+    #[inline]
+    pub fn make_label_global(&mut self, lbl_id: LabelId) {
+        let sym_id = self.get_label(lbl_id).sym;
+        let sym = self.symbol_mut(sym_id);
+        sym.scope = SymbolScope::Linkage;
+    }
+
+    #[inline]
+    #[allow(unused)]
+    pub fn make_current_label_global(&mut self) {
+        let Some(lbl_id) = self.get_curr_label() else {
+            return
+        };
+
+        self.make_label_global(lbl_id);
     }
 
     pub fn encode_inst(

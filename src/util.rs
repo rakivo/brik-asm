@@ -1,10 +1,10 @@
 macro_rules! bail_at {
-    ($path:expr, $line:expr, $err: expr) => {
+    ($path:expr, $line:expr, $($err: tt)*) => {
         anyhow::bail!{
             "{f}:{l}: {e}",
             f = $path,
             l = $line,
-            e = $err
+            e = std::format_args!($($err)*)
         }
     };
 }
