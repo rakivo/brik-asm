@@ -14,7 +14,6 @@ pub fn with_file<R>(
 ) -> anyhow::Result<R> {
     let mut file = OpenOptions::new()
         .read(true)
-        .write(false)
         .open(path)?;
 
     let meta = file.metadata()?;
@@ -39,7 +38,7 @@ pub fn with_file<R>(
         let mut opts = MmapOptions::new();
         opts.len(file_size);
 
-        let mmap = unsafe { opts.map_mut(&file)? };
+        let mmap = unsafe { opts.map(&file)? };
 
         #[cfg(feature = "madvise")]
         unsafe {
