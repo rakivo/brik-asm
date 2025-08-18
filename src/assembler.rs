@@ -140,7 +140,15 @@ pub fn handle_directive<'a>(
             asm.emit_str(&str[1..]);
             asm.edit_curr_label_sym(|s| {
                 s.kind = SymbolKind::Data;
-                // s.scope = SymbolScope::Linkage;
+            });
+        }
+
+        b".asciiz" => {
+            let (str, _) = take_string(rest);
+            asm.emit_str(&str[1..]);
+            asm.emit_byte(0);
+            asm.edit_curr_label_sym(|s| {
+                s.kind = SymbolKind::Data;
             });
         }
 
@@ -149,7 +157,6 @@ pub fn handle_directive<'a>(
             asm.emit_byte(byte);
             asm.edit_curr_label_sym(|s| {
                 s.kind = SymbolKind::Data;
-                // s.scope = SymbolScope::Linkage;
             });
         }
 
