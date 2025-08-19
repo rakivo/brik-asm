@@ -1,5 +1,8 @@
 // TODO(#2): Properly manage symbol sizes
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::{fs, io, str};
 use std::path::{Path, PathBuf};
 
@@ -17,6 +20,7 @@ use brik::object::{
 #[macro_use]
 mod util;
 
+mod sym;
 mod parse;
 mod reader;
 mod encoder;
@@ -65,7 +69,7 @@ fn main() -> anyhow::Result<()> {
         e_flags: 0x4
     });
 
-    let asm = assembler::Assembler::new(Encoder(asm));
+    let asm = assembler::Assembler::new(Encoder::new(asm));
 
     let obj = reader::with_file(&args.input, |src| {
         let src = unsafe {

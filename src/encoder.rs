@@ -1,3 +1,4 @@
+use crate::sym::SymInterner;
 use crate::mnemonic::Mnemonic::{self, *};
 use crate::parse::{
     parse_i,
@@ -16,6 +17,7 @@ use brik::rv64::I64;
 use brik::rv32::I32;
 use brik::rv32::Reg::*;
 use brik::asm::Assembler;
+use brik::asm::label::LabelId;
 use brik::asm::errors::FinishError;
 use brik::object::{SymbolKind, SymbolScope};
 use brik::object::write::{Object, SymbolId};
@@ -30,28 +32,60 @@ pub enum Imm {
     }
 }
 
-#[repr(transparent)]
-pub struct Encoder<'a>(pub(crate) Assembler<'a>);
+pub struct Encoder<'a> {
+    asm: Assembler<'a>,
+    sin: SymInterner
+}
 
 impl<'a> Deref for Encoder<'a> {
     type Target = Assembler<'a>;
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.asm
     }
 }
 
 impl DerefMut for Encoder<'_> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.asm
     }
 }
 
 impl<'a> Encoder<'a> {
+    #[inline]
+    pub fn new(asm: Assembler<'a>) -> Self {
+        Self { asm, sin: SymInterner::new() }
+    }
+
     #[inline(always)]
     pub fn finish(self) -> Result<Object<'a>, FinishError> {
-        self.0.finish()
+        self.asm.finish()
+    }
+
+    #[inline(always)]
+    pub fn symbol_id(&self, name: &[u8]) -> Option<SymbolId> {
+        self.sin.get(name)
+    }
+
+    #[inline(always)]
+    pub fn intern_sym(
+        &mut self,
+        name: impl AsRef<[u8]>,
+        sym_id: SymbolId
+    ) {
+        self.sin.intern(name.as_ref(), sym_id);
+    }
+
+    #[allow(unused)]
+    #[inline(always)]
+    pub fn intern_label(
+        &mut self,
+        name: impl AsRef<[u8]>,
+        lbl_id: LabelId
+    ) {
+        let sym_id = self.get_label(lbl_id).sym;
+        self.intern_sym(name, sym_id);
     }
 
     pub fn encode_inst(
@@ -736,16 +770,20 @@ impl<'a> Encoder<'a> {
     }
 
     #[inline]
-    fn lookup_or_intern_symbol(&mut self, name: &str) -> SymbolId {
-        if let Some(id) = self.symbol_id(name.as_bytes()) {
-            return id
-        }
+    fn lookup_or_intern_symbol(&mut self, name: impl AsRef<[u8]>) -> SymbolId {
+        let name = name.as_ref();
 
-        self.add_symbol_extern(
+        if let Some(id) = self.sin.get(name) { return id }
+
+        let id = self.add_symbol_extern(
             name,
             SymbolKind::Data,
             SymbolScope::Compilation
-        )
+        );
+
+        self.sin.intern(name, id);
+
+        id
     }
 
     fn try_parse_imm<'b>(&mut self, s: &'b str) -> Result<(Imm, &'b str)> {

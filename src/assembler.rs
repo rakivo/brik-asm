@@ -56,7 +56,7 @@ impl<'a> Assembler<'a> {
     pub fn assemble_file(
         mut self,
         path: &Path,
-        src: &str,
+        src: &str
     ) -> anyhow::Result<Object<'a>> {
         self.enc.position_at_end(self.sections.text);
 
@@ -101,6 +101,9 @@ impl<'a> Assembler<'a> {
                     SymbolKind::Text,
                     SymbolScope::Compilation
                 );
+
+                // should we intern labels as well?!
+                // self.enc.intern_label(lbl, lbl_id);
 
                 continue
             }
@@ -179,11 +182,12 @@ impl<'a> Assembler<'a> {
 
             b"extern" | b"extrn" => {
                 let name = get_name()?;
-                self.enc.edit_or_add_sym_and_edit_it(name, |s| {
+                let (_, sym_id) = self.enc.edit_or_add_sym_and_edit_it(name, |s| {
                     s.section = SymbolSection::Undefined;
                     s.scope   = SymbolScope::Dynamic;
                     s.weak    = false;
                 });
+                self.enc.intern_sym(name, sym_id);
             }
 
             b"global" | b"globl" => {
@@ -194,6 +198,8 @@ impl<'a> Assembler<'a> {
                     SymbolScope::Compilation
                 );
                 self.enc.make_label_global(lbl_id);
+                // should we intern labels as well?!
+                // self.enc.intern_label(name, lbl_id);
             }
 
             b"space" => {
