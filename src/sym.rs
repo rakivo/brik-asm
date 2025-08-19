@@ -1,4 +1,4 @@
-use std::mem;
+use std::{mem, ptr};
 
 use brik::object::write::SymbolId;
 
@@ -83,9 +83,9 @@ impl SymInterner {
         self.table.len()
     }
 
+    /// Resize table (call if you expect more symbols)
     #[inline]
     #[allow(unused)]
-    /// Resize table (call if you expect more symbols)
     pub fn reserve(&mut self, additional: usize) {
         if additional > self.capacity() / 2 {
             let new_cap = (self.capacity() + additional).next_power_of_two();
@@ -110,18 +110,27 @@ impl SymInterner {
 fn sym_hash_(data: &[u8]) -> u64 {
     match data.len() {
         0 => 0,
-        1 => data[0] as _,
-        2 => u16::from_le_bytes([data[0], data[1]]) as _,
-        3 => {
-            let mut bytes = [0u8; 4];
-            bytes[..3].copy_from_slice(data);
-            u32::from_le_bytes(bytes) as _
+        1 => data[0] as u64,
+        2 => (data[0] as u64) | ((data[1] as u64) << 8),
+        3 => (data[0] as u64) | ((data[1] as u64) << 8) | ((data[2] as u64) << 16),
+        4 => unsafe {
+            let ptr = data.as_ptr() as *const u32;
+            u32::from_le(ptr::read_unaligned(ptr)) as _
         },
-        4 => u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as _,
-        5..=8 => {
-            let mut bytes = [0u8; 8];
-            bytes[..data.len()].copy_from_slice(data);
-            u64::from_le_bytes(bytes)
+        5..=8 => unsafe {
+            let mut ret = 0u64;
+            let ptr = data.as_ptr() as *const u64;
+            if data.len() == 8 {
+                u64::from_le(ptr::read_unaligned(ptr))
+            } else {
+                // copy only needed bytes
+                ptr::copy_nonoverlapping(
+                    data.as_ptr(),
+                    &mut ret as *mut _ as *mut _,
+                    data.len()
+                );
+                ret.to_le()
+            }
         }
         _ => crc32fast::hash(data) as _
     }
