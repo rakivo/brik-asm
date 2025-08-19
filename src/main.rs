@@ -73,7 +73,7 @@ fn main() -> anyhow::Result<()> {
         };
 
         asm.assemble_file(&args.input, src)
-            .with_context(move || format!("assembling {in_display}"))
+            .with_context(|| format!("assembling {in_display}"))
     })??;
 
     let handle = fs::File::create(&out_path)?;

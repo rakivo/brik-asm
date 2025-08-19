@@ -1,6 +1,9 @@
+use std::{str, fmt, error};
+
 use brik::rv32::{Reg, AqRl};
 
 use anyhow::bail;
+use num_traits::Num;
 use memchr::{memchr, memchr2};
 
 #[inline]
@@ -45,16 +48,25 @@ pub fn take_number(s: &str) -> (&str, &str) {
 
     if matches!(bytes.first(), Some(b'+') | Some(b'-')) { i += 1 }
 
+    let c_cmp = if matches!{
+        (bytes.first(), bytes.get(1)), (Some(b'0'), Some(b'x'))
+    } {
+        i += 2;
+        u8::is_ascii_hexdigit
+    } else {
+        u8::is_ascii_digit
+    };
+
     while i + 4 <= bytes.len() {
         let chunk = [bytes[i], bytes[i+1], bytes[i+2], bytes[i+3]];
-        if chunk.iter().all(|b| b.is_ascii_digit()) {
+        if chunk.iter().all(c_cmp) {
             i += 4
         } else {
             break
         }
     }
 
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
+    while i < bytes.len() && c_cmp(&bytes[i]) {
         i += 1
     }
 
@@ -65,8 +77,12 @@ pub fn take_number(s: &str) -> (&str, &str) {
 pub fn take_ident(s: &str) -> (&str, &str) {
     let bytes = s.as_bytes();
     let mut i = 0;
-    while i < bytes.len() && bytes[i].is_ascii_alphanumeric() {
-        i += 1
+    // first char: must be letter or underscore
+    if i < bytes.len() && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+        i += 1;
+        while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+            i += 1
+        }
     }
     (&s[..i], &s[i..])
 }
@@ -101,7 +117,7 @@ pub fn take_string(s: &str) -> (&str, &str) {
     }
 
     if let Some(end) = memchr(b'"', &bytes[1..]) {
-        let total_len = end + 1;
+        let total_len = end + 2;
         (&s[..total_len], &s[total_len..])
     } else {
         (s, "")
@@ -147,15 +163,63 @@ pub fn parse_i16(s: &str) -> anyhow::Result<i16> { parse_i::<i16>(s) }
 pub fn parse_u8(s: &str) -> anyhow::Result<u8> { parse_i::<u8>(s) }
 
 #[inline]
-pub fn parse_i<T: core::str::FromStr>(s: &str) -> anyhow::Result<T> {
+pub fn parse_i<T>(s: &str) -> anyhow::Result<T>
+where
+    T: Num,
+    <T as Num>::FromStrRadixErr: fmt::Display
+{
     let s = &s[skip_whitespace(s)..];
-    let (tok, rest) = if let Some(rs) = s.strip_prefix("0x") {
-        take_hex(rs)
+    let ((tok, rest), radix) = if let Some(rest) = s.strip_prefix("0x") {
+        (take_hex(rest), 16)
     } else {
-        take_signed(s)
+        (take_signed(s), 10)
     };
     ensure_comma_or_end(rest)?;
-    tok.parse().map_err(|_| anyhow::anyhow!("bad number: {tok}"))
+    T::from_str_radix(tok, radix).map_err(|e| {
+        anyhow::anyhow!{
+            "couldn't parse {tok:?} to {ty:?}: {e}",
+            ty = std::any::type_name::<T>()
+        }
+    })
+}
+
+#[inline]
+pub fn parse_aqrl(operands: &str) -> anyhow::Result<AqRl> {
+    let trimmed = operands.trim();
+    Ok(match trimmed {
+        ""     => AqRl::None,
+        "aq"   => AqRl::Acquire,
+        "rl"   => AqRl::Release,
+        "aqrl" => AqRl::AcquireRelease,
+        _ => bail!("invalid acquire/release specifier"),
+    })
+}
+
+#[inline]
+pub fn with_cs_list<T>(input: &str, mut f: impl FnMut(T)) -> anyhow::Result<()>
+where
+    T: Num + str::FromStr,
+    <T as Num>::FromStrRadixErr: fmt::Display,
+    <T as str::FromStr>::Err: Send + Sync + fmt::Display + error::Error + 'static
+{
+    let bytes = input.as_bytes();
+
+    let mut byte_offset = 0;
+    while byte_offset < bytes.len() {
+        let end = memchr(b',', &bytes[byte_offset..])
+            .map(|pos| byte_offset + pos)
+            .unwrap_or(bytes.len());
+
+        let item = input[byte_offset..end].trim();
+        if !item.is_empty() {
+            let val = parse_i(item)?;
+            f(val);
+        }
+
+        byte_offset = end + 1;
+    }
+
+    Ok(())
 }
 
 pub fn parse_reg(s: &str) -> anyhow::Result<(Reg, &str)> {
@@ -216,18 +280,6 @@ pub fn parse_reg(s: &str) -> anyhow::Result<(Reg, &str)> {
     ensure_comma_or_end(rest)?;
 
     Ok((Reg::from_u32(reg_num), trim_next(rest)))
-}
-
-#[inline]
-pub fn parse_aqrl(operands: &str) -> anyhow::Result<AqRl> {
-    let trimmed = operands.trim();
-    Ok(match trimmed {
-        ""     => AqRl::None,
-        "aq"   => AqRl::Acquire,
-        "rl"   => AqRl::Release,
-        "aqrl" => AqRl::AcquireRelease,
-        _ => bail!("invalid acquire/release specifier"),
-    })
 }
 
 #[cfg(test)]

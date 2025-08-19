@@ -87,7 +87,7 @@ impl<'a> Encoder<'a> {
         self.edit_sym(sym_id, f)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn place_or_add_label_here(
         &mut self,
         name: impl AsRef<[u8]>,
@@ -97,12 +97,17 @@ impl<'a> Encoder<'a> {
         if let Some(lbl_id) = self.get_label_id(&name) {
             self.place_label_here(lbl_id);
             lbl_id
+        } else if let Some(sym_id) = self.symbol_id(name.as_ref()) {
+            let s = self.symbol_mut(sym_id);
+            s.kind  = kind;
+            s.scope = scope;
+            self.add_label(name, sym_id)
         } else {
             self.add_label_here(name, kind, scope)
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get_or_declare_label(
         &mut self,
         name: impl AsRef<[u8]>,
@@ -111,6 +116,11 @@ impl<'a> Encoder<'a> {
     ) -> LabelId {
         if let Some(lbl_id) = self.get_label_id(&name) {
             lbl_id
+        } else if let Some(sym_id) = self.symbol_id(name.as_ref()) {
+            let s = self.symbol_mut(sym_id);
+            s.kind  = kind;
+            s.scope = scope;
+            self.add_label(name, sym_id)
         } else {
             self.declare_label(name, kind, scope)
         }
@@ -159,8 +169,8 @@ impl<'a> Encoder<'a> {
     ) -> Result<()> {
         match m {
             SD => {
-                let (s1, rest) = parse_reg(operands)?;
-                let (s2, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
                 let im = parse_i16(rest)?;
                 self.emit_sd(s1, s2, im);
             }
@@ -175,7 +185,6 @@ impl<'a> Encoder<'a> {
                 let (rs1, rest) = parse_reg(rest)?;
                 let (imm, _rest) = self.try_parse_imm(rest)?;
                 maybe_reloc!(self, ADDI, rd=rd, rs1=rs1, imm=imm, kind=RelocKind::PcrelLo12I);
-
             }
             EBREAK => {
                 self.emit_bytes(I32::EBREAK {});
@@ -387,20 +396,20 @@ impl<'a> Encoder<'a> {
 
             // Store instructions
             SB => {
-                let (s1, rest) = parse_reg(operands)?;
-                let (s2, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
                 let im = parse_i16(rest)?;
                 self.emit_bytes(I32::SB { s1, s2, im });
             }
             SH => {
-                let (s1, rest) = parse_reg(operands)?;
-                let (s2, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
                 let im = parse_i16(rest)?;
                 self.emit_bytes(I32::SH { s1, s2, im });
             }
             SW => {
-                let (s1, rest) = parse_reg(operands)?;
-                let (s2, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
                 let im = parse_i16(rest)?;
                 self.emit_bytes(I32::SW { s1, s2, im });
             }

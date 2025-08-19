@@ -2,6 +2,7 @@ use crate::encoder::Encoder;
 use crate::mnemonic::Mnemonic;
 use crate::parse::{
     parse_i,
+    with_cs_list,
     take_string,
     strip_comment,
     split_at_space,
@@ -54,7 +55,7 @@ impl<'a> Assembler<'a> {
 
     pub fn assemble_file(
         mut self,
-        path: &'a Path,
+        path: &Path,
         src: &str,
     ) -> anyhow::Result<Object<'a>> {
         self.enc.position_at_end(self.sections.text);
@@ -75,7 +76,7 @@ impl<'a> Assembler<'a> {
 
             if first_byte == b';' { continue }
 
-            let line = strip_comment(line);
+            let line = strip_comment(line).trim();
 
             if line.is_empty() { continue }
 
@@ -104,8 +105,16 @@ impl<'a> Assembler<'a> {
                 continue
             }
 
+            let fl_context = |asm: &Self| format!{
+                "{f}:{l}:",
+                f = path.display(),
+                l = asm.line_number
+            };
+
             if first_byte == b'.' {
-                self.handle_directive(path, line)?;
+                self.handle_directive(path, line)
+                    .with_context(|| fl_context(&self))?;
+
                 continue
             }
 
@@ -113,7 +122,9 @@ impl<'a> Assembler<'a> {
             let m = Mnemonic::try_from_str(mn)
                 .ok_or_else(|| anyhow::anyhow!("unknown mnemonic: {mn}"))?;
 
-            self.enc.encode_inst(m, rest)?;
+            self.enc
+                .encode_inst(m, rest)
+                .with_context(|| fl_context(&self))?;
         }
 
         self.enc
@@ -127,7 +138,7 @@ impl<'a> Assembler<'a> {
 
     fn handle_directive(
         &mut self,
-        path: &'a Path,
+        path: &Path,
         line: &str
     ) -> anyhow::Result<()> {
         let (dir, rest) = split_at_space(line);
@@ -185,9 +196,18 @@ impl<'a> Assembler<'a> {
                 self.enc.make_label_global(lbl_id);
             }
 
+            b"space" => {
+                let count = parse_i::<u64>(rest)?;
+                self.enc.emit_zeroes(count as _);
+                self.enc.edit_curr_label_sym(|s| {
+                    s.kind = SymbolKind::Data;
+                });
+            }
+
             b"ascii" => {
                 let (str, _) = take_string(rest);
-                self.enc.emit_string(str[1..].to_owned());
+                let v = &str[1..str.len() - 1];
+                self.enc.emit_string(v.to_owned());
                 self.enc.edit_curr_label_sym(|s| {
                     s.kind = SymbolKind::Data;
                 });
@@ -195,7 +215,8 @@ impl<'a> Assembler<'a> {
 
             b"asciiz" => {
                 let (str, _) = take_string(rest);
-                self.enc.emit_string(str[1..].to_owned());
+                let v = &str[1..str.len() - 1];
+                self.enc.emit_string(v.to_owned());
                 self.enc.emit_byte(0);
                 self.enc.edit_curr_label_sym(|s| {
                     s.kind = SymbolKind::Data;
@@ -203,11 +224,27 @@ impl<'a> Assembler<'a> {
             }
 
             b"byte" => {
-                let byte = parse_i::<u8>(rest)?;
-                self.enc.emit_byte(byte);
-                self.enc.edit_curr_label_sym(|s| {
-                    s.kind = SymbolKind::Data;
-                });
+                self.enc.align_to(1);
+                with_cs_list(rest, |v| _ = self.enc.emit_byte(v))?;
+                self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
+            }
+
+            b"hword" => {
+                self.enc.align_to(2);
+                with_cs_list(rest, |v| _ = self.enc.emit_half(v))?;
+                self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
+            }
+
+            b"word" => {
+                self.enc.align_to(4);
+                with_cs_list(rest, |v| _ = self.enc.emit_word(v))?;
+                self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
+            }
+
+            b"dword" => {
+                self.enc.align_to(8);
+                with_cs_list(rest, |v| _ = self.enc.emit_dword(v))?;
+                self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
             }
 
             _ => bail_at!(path.display(), self.line_number, "unknown directive {dir}")
