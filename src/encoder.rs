@@ -4,6 +4,7 @@ use crate::parse::{
     parse_u8,
     parse_i16,
     parse_reg,
+    parse_aqrl,
     take_ident,
     take_number,
     ensure_empty,
@@ -11,6 +12,7 @@ use crate::parse::{
 
 use std::ops::{Deref, DerefMut};
 
+use brik::rv64::I64;
 use brik::rv32::I32;
 use brik::rv32::Reg::*;
 use brik::asm::Assembler;
@@ -300,6 +302,532 @@ impl<'a> Encoder<'a> {
                 let (rs1, rest) = parse_reg(rest)?;
                 let sh = parse_u8(rest)?;
                 self.emit_bytes(I32::SRAI { d: rd, s: rs1, shamt: sh });
+            }
+            // Branch instructions
+            BEQ => {
+                let (s1, rest) = parse_reg(operands)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest)?;
+                ensure_empty(rest)?;
+                maybe_reloc!(self, BEQ, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
+            }
+            BNE => {
+                let (s1, rest) = parse_reg(operands)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest)?;
+                ensure_empty(rest)?;
+                maybe_reloc!(self, BNE, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
+            }
+            BLT => {
+                let (s1, rest) = parse_reg(operands)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest)?;
+                ensure_empty(rest)?;
+                maybe_reloc!(self, BLT, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
+            }
+            BGE => {
+                let (s1, rest) = parse_reg(operands)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest)?;
+                ensure_empty(rest)?;
+                maybe_reloc!(self, BGE, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
+            }
+            BLTU => {
+                let (s1, rest) = parse_reg(operands)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest)?;
+                ensure_empty(rest)?;
+                maybe_reloc!(self, BLTU, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
+            }
+            BGEU => {
+                let (s1, rest) = parse_reg(operands)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest)?;
+                ensure_empty(rest)?;
+                maybe_reloc!(self, BGEU, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
+            }
+
+            // Load instructions
+            LB => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let im = parse_i16(rest)?;
+                self.emit_bytes(I32::LB { d, s, im });
+            }
+            LH => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let im = parse_i16(rest)?;
+                self.emit_bytes(I32::LH { d, s, im });
+            }
+            LW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let im = parse_i16(rest)?;
+                self.emit_bytes(I32::LW { d, s, im });
+            }
+            LBU => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let im = parse_i16(rest)?;
+                self.emit_bytes(I32::LBU { d, s, im });
+            }
+            LHU => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let im = parse_i16(rest)?;
+                self.emit_bytes(I32::LHU { d, s, im });
+            }
+            LWU => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let im = parse_i16(rest)?;
+                self.emit_bytes(I64::LWU { d, s, im });
+            }
+
+            // Store instructions
+            SB => {
+                let (s1, rest) = parse_reg(operands)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let im = parse_i16(rest)?;
+                self.emit_bytes(I32::SB { s1, s2, im });
+            }
+            SH => {
+                let (s1, rest) = parse_reg(operands)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let im = parse_i16(rest)?;
+                self.emit_bytes(I32::SH { s1, s2, im });
+            }
+            SW => {
+                let (s1, rest) = parse_reg(operands)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let im = parse_i16(rest)?;
+                self.emit_bytes(I32::SW { s1, s2, im });
+            }
+
+            // Immediate arithmetic/logic instructions
+            SLTI => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest)?;
+                ensure_empty(rest)?;
+                maybe_reloc!(self, SLTI, rd=d, rs1=s, imm=imm, kind=RelocKind::PcrelLo12I);
+            }
+            SLTIU => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest)?;
+                ensure_empty(rest)?;
+                maybe_reloc!(self, SLTIU, rd=d, rs1=s, imm=imm, kind=RelocKind::PcrelLo12I);
+            }
+
+            // Register-register operations
+            SUB => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::SUB { d, s1, s2 });
+            }
+            SLL => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::SLL { d, s1, s2 });
+            }
+            SRL => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::SRL { d, s1, s2 });
+            }
+            SRA => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::SRA { d, s1, s2 });
+            }
+            SLT => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::SLT { d, s1, s2 });
+            }
+            SLTU => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::SLTU { d, s1, s2 });
+            }
+            XOR => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::XOR { d, s1, s2 });
+            }
+            OR => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::OR { d, s1, s2 });
+            }
+            AND => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::AND { d, s1, s2 });
+            }
+
+            // Fence instruction
+            FENCE => {
+                let im = parse_i16(operands)?;
+                self.emit_bytes(I32::FENCE { im });
+            }
+
+            // M-extension instructions
+            MUL => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::MUL { d, s1, s2 });
+            }
+            MULH => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::MULH { d, s1, s2 });
+            }
+            MULHSU => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::MULHSU { d, s1, s2 });
+            }
+            MULHU => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::MULHU { d, s1, s2 });
+            }
+            DIV => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::DIV { d, s1, s2 });
+            }
+            DIVU => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::DIVU { d, s1, s2 });
+            }
+            REM => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::REM { d, s1, s2 });
+            }
+            REMU => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I32::REMU { d, s1, s2 });
+            }
+
+            // A-extension Load-Reserved/Store-Conditional (32-bit)
+            LR_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::LR_W { d, s1, aqrl });
+            }
+            SC_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::SC_W { d, s1, s2, aqrl });
+            }
+
+            // A-extension Atomic Memory Operations (32-bit)
+            AMOADD_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::AMOADD_W { d, s1, s2, aqrl });
+            }
+            AMOSWAP_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::AMOSWAP_W { d, s1, s2, aqrl });
+            }
+            AMOAND_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::AMOAND_W { d, s1, s2, aqrl });
+            }
+            AMOOR_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::AMOOR_W { d, s1, s2, aqrl });
+            }
+            AMOXOR_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::AMOXOR_W { d, s1, s2, aqrl });
+            }
+            AMOMAX_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::AMOMAX_W { d, s1, s2, aqrl });
+            }
+            AMOMIN_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::AMOMIN_W { d, s1, s2, aqrl });
+            }
+            AMOMAXU_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::AMOMAXU_W { d, s1, s2, aqrl });
+            }
+            AMOMINU_W => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I32::AMOMINU_W { d, s1, s2, aqrl });
+            }
+
+            // RV64I-specific instructions
+            ADDW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::ADDW { d, s1, s2 });
+            }
+            SUBW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::SUBW { d, s1, s2 });
+            }
+            ADDIW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest)?;
+                ensure_empty(rest)?;
+                maybe_reloc!(self, ADDIW, rd=d, rs1=s, imm=imm, kind=RelocKind::PcrelLo12I);
+            }
+            SLLW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::SLLW { d, s1, s2 });
+            }
+            SRLW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::SRLW { d, s1, s2 });
+            }
+            SRAW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::SRAW { d, s1, s2 });
+            }
+            SLLIW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let shamt = parse_u8(rest)?;
+                self.emit_bytes(I64::SLLIW { d, s, shamt });
+            }
+            SRLIW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let shamt = parse_u8(rest)?;
+                self.emit_bytes(I64::SRLIW { d, s, shamt });
+            }
+            SRAIW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s, rest) = parse_reg(rest)?;
+                let shamt = parse_u8(rest)?;
+                self.emit_bytes(I64::SRAIW { d, s, shamt });
+            }
+
+            // RV64 M-extension
+            MULW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::MULW { d, s1, s2 });
+            }
+            DIVW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::DIVW { d, s1, s2 });
+            }
+            DIVUW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::DIVUW { d, s1, s2 });
+            }
+            REMW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::REMW { d, s1, s2 });
+            }
+            REMUW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::REMUW { d, s1, s2 });
+            }
+            MULHW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::MULHW { d, s1, s2 });
+            }
+            MULHSUW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::MULHSUW { d, s1, s2 });
+            }
+            MULHUW => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                ensure_empty(rest)?;
+                self.emit_bytes(I64::MULHUW { d, s1, s2 });
+            }
+
+            // RV64 A-extension Load-Reserved/Store-Conditional (64-bit)
+            LR_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::LR_D { d, s1, aqrl });
+            }
+            SC_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::SC_D { d, s1, s2, aqrl });
+            }
+
+            // RV64 A-extension Atomic Memory Operations (64-bit)
+            AMOADD_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::AMOADD_D { d, s1, s2, aqrl });
+            }
+            AMOSWAP_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::AMOSWAP_D { d, s1, s2, aqrl });
+            }
+            AMOAND_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::AMOAND_D { d, s1, s2, aqrl });
+            }
+            AMOOR_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::AMOOR_D { d, s1, s2, aqrl });
+            }
+            AMOXOR_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::AMOXOR_D { d, s1, s2, aqrl });
+            }
+            AMOMAX_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::AMOMAX_D { d, s1, s2, aqrl });
+            }
+            AMOMIN_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::AMOMIN_D { d, s1, s2, aqrl });
+            }
+            AMOMAXU_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::AMOMAXU_D { d, s1, s2, aqrl });
+            }
+            AMOMINU_D => {
+                let (d, rest) = parse_reg(operands)?;
+                let (s1, rest) = parse_reg(rest)?;
+                let (s2, rest) = parse_reg(rest)?;
+                let aqrl = parse_aqrl(rest)?;
+                self.emit_bytes(I64::AMOMINU_D { d, s1, s2, aqrl });
             }
         };
 

@@ -1,4 +1,4 @@
-use brik::rv32::Reg;
+use brik::rv32::{Reg, AqRl};
 
 use anyhow::bail;
 use memchr::{memchr, memchr2};
@@ -216,6 +216,18 @@ pub fn parse_reg(s: &str) -> anyhow::Result<(Reg, &str)> {
     ensure_comma_or_end(rest)?;
 
     Ok((Reg::from_u32(reg_num), trim_next(rest)))
+}
+
+#[inline]
+pub fn parse_aqrl(operands: &str) -> anyhow::Result<AqRl> {
+    let trimmed = operands.trim();
+    Ok(match trimmed {
+        ""     => AqRl::None,
+        "aq"   => AqRl::Acquire,
+        "rl"   => AqRl::Release,
+        "aqrl" => AqRl::AcquireRelease,
+        _ => bail!("invalid acquire/release specifier"),
+    })
 }
 
 #[cfg(test)]

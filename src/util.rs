@@ -21,11 +21,11 @@ macro_rules! maybe_reloc {
 
         match $imm {
             Imm::Int(val) => {
-                $self.emit_bytes(I32::$ctor { d: $rd, im: val as _ });
+                $self.emit_bytes($ctor { d: $rd, im: val as _ });
             }
             Imm::Sym { sym, addend } => {
                 let offset = $self.curr_offset();
-                $self.emit_bytes(I32::$ctor { d: $rd, im: 0 });
+                $self.emit_bytes($ctor { d: $rd, im: 0 });
                 let section = $self.expect_curr_section();
                 $self.add_reloc(
                     section,
@@ -46,11 +46,11 @@ macro_rules! maybe_reloc {
 
         match $imm {
             Imm::Int(val) => {
-                $self.emit_bytes(I32::$ctor { d: $rd, s: $rs1, im: val as _ });
+                $self.emit_bytes($ctor { d: $rd, s: $rs1, im: val as _ });
             }
             Imm::Sym { sym, addend } => {
                 let offset = $self.curr_offset();
-                $self.emit_bytes(I32::$ctor { d: $rd, s: $rs1, im: 0 });
+                $self.emit_bytes($ctor { d: $rd, s: $rs1, im: 0 });
                 let section = $self.expect_curr_section();
                 $self.add_reloc(
                     section,
@@ -71,11 +71,11 @@ macro_rules! maybe_reloc {
 
         match $imm {
             Imm::Int(val) => {
-                $self.emit_bytes(I32::$ctor { s1: $rs1, s2: $rs2, im: val as _ });
+                $self.emit_bytes($ctor { s1: $rs1, s2: $rs2, im: val as _ });
             }
             Imm::Sym { sym, addend } => {
                 let offset = $self.curr_offset();
-                $self.emit_bytes(I32::$ctor { s1: $rs1, s2: $rs2, im: 0 });
+                $self.emit_bytes($ctor { s1: $rs1, s2: $rs2, im: 0 });
                 let section = $self.expect_curr_section();
                 $self.add_reloc(
                     section,
