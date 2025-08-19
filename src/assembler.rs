@@ -73,9 +73,7 @@ impl<'a> Assembler<'a> {
                 continue
             };
 
-            if first_byte == b';' {
-                continue
-            }
+            if first_byte == b';' { continue }
 
             let line = strip_comment(line);
 
@@ -170,11 +168,11 @@ impl<'a> Assembler<'a> {
 
             b"extern" | b"extrn" => {
                 let name = get_name()?;
-                self.enc.add_symbol_extern(
-                    name,
-                    SymbolKind::Text,
-                    SymbolScope::Dynamic
-                );
+                self.enc.edit_or_add_sym(name, |s| {
+                    s.section = SymbolSection::Undefined;
+                    s.scope   = SymbolScope::Dynamic;
+                    s.weak    = false;
+                });
             }
 
             b"global" | b"globl" => {

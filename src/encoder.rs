@@ -53,6 +53,38 @@ impl<'a> Encoder<'a> {
         self.0.finish()
     }
 
+    #[inline(always)]
+    pub fn make_sym_global(&mut self, sym_id: SymbolId) {
+        self.edit_sym(sym_id, |s| s.scope = SymbolScope::Dynamic)
+    }
+
+    #[inline]
+    pub fn edit_sym<R>(
+        &mut self,
+        sym_id: SymbolId,
+        f: impl FnOnce(&mut Symbol) -> R
+    ) -> R {
+        let sym = self.symbol_mut(sym_id);
+        f(sym)
+    }
+
+    #[inline]
+    pub fn edit_or_add_sym_and_edit_it<R>(
+        &mut self,
+        name: impl AsRef<[u8]>,
+        f: impl FnOnce(&mut Symbol) -> R
+    ) -> R {
+        let sym_id = self.symbol_id(name.as_ref()).unwrap_or_else(|| {
+            self.add_symbol_extern(
+                name,
+                SymbolKind::Text,
+                SymbolScope::Dynamic
+            )
+        });
+
+        self.edit_sym(sym_id, f)
+    }
+
     #[inline]
     pub fn place_or_add_label_here(
         &mut self,
@@ -83,16 +115,6 @@ impl<'a> Encoder<'a> {
     }
 
     #[inline]
-    pub fn edit_sym<R>(
-        &mut self,
-        sym_id: SymbolId,
-        f: impl FnOnce(&mut Symbol) -> R
-    ) -> R {
-        let sym = self.symbol_mut(sym_id);
-        f(sym)
-    }
-
-    #[inline]
     #[allow(unused)]
     pub fn edit_label_sym<R>(
         &mut self,
@@ -115,8 +137,7 @@ impl<'a> Encoder<'a> {
     #[inline]
     pub fn make_label_global(&mut self, lbl_id: LabelId) {
         let sym_id = self.get_label(lbl_id).sym;
-        let sym = self.symbol_mut(sym_id);
-        sym.scope = SymbolScope::Dynamic;
+        self.make_sym_global(sym_id);
     }
 
     #[inline]
