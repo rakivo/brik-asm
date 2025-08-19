@@ -6,17 +6,16 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 memchr = "2.7"
-ahash = { version = "0.8", default-features = false, features = ["std"] }
-smallvec = { version = "1.13", features = ["const_new"] }
-thiserror = "1.0"
 anyhow = "1.0"
 memmap2 = { version = "=0.9.7",   default-features = false }
-brik = { git = "https://github.com/rakivo/brik", rev = "1fe3c5c", features = ["fancy-diagnostics"]}
+brik = { git = "https://github.com/rakivo/brik", rev = "1fe3c5c" }
 libc = { version = "0.2.175", optional = true } # madvise
 
 [features]
-default = ["madvise"]
+default = ["madvise", "brik-fancy-diagnostics"]
+
 madvise = ["libc"]
+brik-fancy-diagnostics = ["brik/fancy-diagnostics"]
 
 [profile.release]
 opt-level = 3

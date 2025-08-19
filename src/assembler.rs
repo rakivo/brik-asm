@@ -168,7 +168,7 @@ impl<'a> Assembler<'a> {
 
             b"extern" | b"extrn" => {
                 let name = get_name()?;
-                self.enc.edit_or_add_sym(name, |s| {
+                self.enc.edit_or_add_sym_and_edit_it(name, |s| {
                     s.section = SymbolSection::Undefined;
                     s.scope   = SymbolScope::Dynamic;
                     s.weak    = false;

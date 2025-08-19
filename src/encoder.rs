@@ -58,7 +58,7 @@ impl<'a> Encoder<'a> {
         self.edit_sym(sym_id, |s| s.scope = SymbolScope::Dynamic)
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn edit_sym<R>(
         &mut self,
         sym_id: SymbolId,
@@ -85,7 +85,7 @@ impl<'a> Encoder<'a> {
         self.edit_sym(sym_id, f)
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn place_or_add_label_here(
         &mut self,
         name: impl AsRef<[u8]>,
@@ -100,7 +100,7 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn get_or_declare_label(
         &mut self,
         name: impl AsRef<[u8]>,
@@ -114,8 +114,8 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    #[inline]
     #[allow(unused)]
+    #[inline(always)]
     pub fn edit_label_sym<R>(
         &mut self,
         lbl_id: LabelId,
@@ -125,7 +125,7 @@ impl<'a> Encoder<'a> {
         self.edit_sym(sym_id, f)
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn edit_curr_label_sym<R>(
         &mut self,
         f: impl FnOnce(&mut Symbol) -> R
@@ -134,14 +134,14 @@ impl<'a> Encoder<'a> {
         self.edit_label_sym(lbl_id, f)
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn make_label_global(&mut self, lbl_id: LabelId) {
         let sym_id = self.get_label(lbl_id).sym;
         self.make_sym_global(sym_id);
     }
 
-    #[inline]
     #[allow(unused)]
+    #[inline(always)]
     pub fn make_current_label_global(&mut self) {
         let Some(lbl_id) = self.get_curr_label() else {
             return
