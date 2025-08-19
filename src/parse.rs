@@ -124,7 +124,7 @@ pub fn take_number(s: &str) -> (&str, &str) {
         let b6 = ((chunk >> 48) & 0xFF) as usize;
         let b7 = ((chunk >> 56) & 0xFF) as usize;
 
-        // TODO: use actual SIMD here
+        // TODO(#3): use actual SIMD here
         // check all 8 bytes at once
         if (DIGIT_TABLE[b0] & digit_mask) != 0 &&
            (DIGIT_TABLE[b1] & digit_mask) != 0 &&
