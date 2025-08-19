@@ -40,6 +40,5 @@ main:
 .rodata
 msg:
     .ascii "Hello from RISC-V!"
-    .byte 10
-    .byte 0
+    .byte 10, 0
 ```
