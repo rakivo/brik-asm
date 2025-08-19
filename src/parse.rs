@@ -1,10 +1,55 @@
-use std::{str, fmt, error};
+use std::{str, fmt, ptr, error};
 
 use brik::rv32::{Reg, AqRl};
 
 use anyhow::bail;
 use num_traits::Num;
 use memchr::{memchr, memchr2};
+
+const DIGIT_TABLE: [u8; 256] = const {
+    let mut table = [0u8; 256];
+    let mut i = 0;
+    while i < 256 {
+        if i >= b'0' as usize && i <= b'9' as usize {
+            table[i] = 1; // decimal digit
+        } else if (i >= b'a' as usize && i <= b'f' as usize) ||
+                  (i >= b'A' as usize && i <= b'F' as usize) {
+            table[i] = 2; // hex digit (also valid decimal)
+        }
+        i += 1;
+    }
+    // mark decimal digits as both 1 and 2
+    i = b'0' as usize;
+    while i <= b'9' as usize {
+        table[i] = 3; // both decimal and hex
+        i += 1;
+    }
+    table
+};
+
+const IDENT_TABLE: [u8; 256] = const {
+    let mut table = [0u8; 256];
+    let mut i = 0;
+    while i < 256 {
+        if (i >= b'a' as usize && i <= b'z' as usize) ||
+           (i >= b'A' as usize && i <= b'Z' as usize) ||
+           i == b'_' as usize {
+            table[i] = 1; // valid first char
+        } else if i >= b'0' as usize && i <= b'9' as usize {
+            table[i] = 2; // valid non-first char
+        }
+        i += 1;
+    }
+    // mark first chars as also valid non-first
+    i = 0;
+    while i < 256 {
+        if table[i] == 1 {
+            table[i] = 3; // valid both first and non-first
+        }
+        i += 1;
+    }
+    table
+};
 
 #[inline]
 pub fn skip_whitespace(s: &str) -> usize {
@@ -22,7 +67,7 @@ pub fn skip_whitespace(s: &str) -> usize {
     i
 }
 
-#[inline]
+#[inline(always)]
 pub fn split_at_space(s: &str) -> (&str, &str) {
     if let Some(i) = memchr2(b' ', b'\t', s.as_bytes()) {
         let (a, b) = s.split_at(i);
@@ -32,7 +77,7 @@ pub fn split_at_space(s: &str) -> (&str, &str) {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn strip_comment(s: &str) -> &str {
     if let Some(idx) = s.bytes().rposition(|b| b == b';') {
         &s[..idx]
@@ -44,29 +89,75 @@ pub fn strip_comment(s: &str) -> &str {
 #[inline]
 pub fn take_number(s: &str) -> (&str, &str) {
     let bytes = s.as_bytes();
+    if bytes.is_empty() { return ("", s); }
+
     let mut i = 0;
 
-    if matches!(bytes.first(), Some(b'+') | Some(b'-')) { i += 1 }
+    // branchless sign check
+    let has_sign = bytes[0] == b'+' || bytes[0] == b'-';
+    i += has_sign as usize;
 
-    let c_cmp = if matches!{
-        (bytes.first(), bytes.get(1)), (Some(b'0'), Some(b'x'))
-    } {
-        i += 2;
-        u8::is_ascii_hexdigit
-    } else {
-        u8::is_ascii_digit
-    };
+    if i >= bytes.len() { return (&s[..i], &s[i..]); }
 
-    while i + 4 <= bytes.len() {
-        let chunk = [bytes[i], bytes[i+1], bytes[i+2], bytes[i+3]];
-        if chunk.iter().all(c_cmp) {
-            i += 4
+    let is_hex = i + 1 < bytes.len() && bytes[i] == b'0' &&
+                 (bytes[i + 1] == b'x' || bytes[i + 1] == b'X');
+    i += (is_hex as usize) * 2;
+
+    if i >= bytes.len() { return (&s[..i], &s[i..]); }
+
+    // 3 = decimal+hex, 2 = hex only
+    let digit_mask = if is_hex { 2 } else { 3 };
+
+    // SIMD-like 8 bytes at once
+    while i + 8 <= bytes.len() {
+        let chunk = unsafe {
+            // Load 8 bytes as u64 for fast processing
+            ptr::read_unaligned(bytes.as_ptr().add(i) as *const u64).to_le()
+        };
+
+        let b0 = ((chunk >>  0) & 0xFF) as usize;
+        let b1 = ((chunk >>  8) & 0xFF) as usize;
+        let b2 = ((chunk >> 16) & 0xFF) as usize;
+        let b3 = ((chunk >> 24) & 0xFF) as usize;
+        let b4 = ((chunk >> 32) & 0xFF) as usize;
+        let b5 = ((chunk >> 40) & 0xFF) as usize;
+        let b6 = ((chunk >> 48) & 0xFF) as usize;
+        let b7 = ((chunk >> 56) & 0xFF) as usize;
+
+        // TODO: use actual SIMD here
+        // check all 8 bytes at once
+        if (DIGIT_TABLE[b0] & digit_mask) != 0 &&
+           (DIGIT_TABLE[b1] & digit_mask) != 0 &&
+           (DIGIT_TABLE[b2] & digit_mask) != 0 &&
+           (DIGIT_TABLE[b3] & digit_mask) != 0 &&
+           (DIGIT_TABLE[b4] & digit_mask) != 0 &&
+           (DIGIT_TABLE[b5] & digit_mask) != 0 &&
+           (DIGIT_TABLE[b6] & digit_mask) != 0 &&
+           (DIGIT_TABLE[b7] & digit_mask) != 0 {
+            i += 8;
         } else {
-            break
+            // find exactly where it stopped
+            if (DIGIT_TABLE[b0] & digit_mask) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b1] & digit_mask) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b2] & digit_mask) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b3] & digit_mask) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b4] & digit_mask) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b5] & digit_mask) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b6] & digit_mask) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b7] & digit_mask) == 0 { break }
+            i += 1;
+            break;
         }
     }
 
-    while i < bytes.len() && c_cmp(&bytes[i]) {
+    while i < bytes.len() && (DIGIT_TABLE[bytes[i] as usize] & digit_mask) != 0 {
         i += 1
     }
 
@@ -76,36 +167,177 @@ pub fn take_number(s: &str) -> (&str, &str) {
 #[inline]
 pub fn take_ident(s: &str) -> (&str, &str) {
     let bytes = s.as_bytes();
-    let mut i = 0;
-    // first char: must be letter or underscore
-    if i < bytes.len() && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
-        i += 1;
-        while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-            i += 1
+    if bytes.is_empty() { return ("", s) }
+
+    // Fast first character check
+    if IDENT_TABLE[bytes[0] as usize] & 1 == 0 {
+        return ("", s)
+    }
+
+    let mut i = 1;
+
+    // SIMD-like 8 bytes at once
+    while i + 8 <= bytes.len() {
+        let chunk = unsafe {
+            ptr::read_unaligned(bytes.as_ptr().add(i) as *const u64).to_le()
+        };
+
+        let b0 = ((chunk >>  0) & 0xFF) as usize;
+        let b1 = ((chunk >>  8) & 0xFF) as usize;
+        let b2 = ((chunk >> 16) & 0xFF) as usize;
+        let b3 = ((chunk >> 24) & 0xFF) as usize;
+        let b4 = ((chunk >> 32) & 0xFF) as usize;
+        let b5 = ((chunk >> 40) & 0xFF) as usize;
+        let b6 = ((chunk >> 48) & 0xFF) as usize;
+        let b7 = ((chunk >> 56) & 0xFF) as usize;
+
+        // check if all are valid identifier chars (first or non-first)
+        if IDENT_TABLE[b0] != 0 &&
+           IDENT_TABLE[b1] != 0 &&
+           IDENT_TABLE[b2] != 0 &&
+           IDENT_TABLE[b3] != 0 &&
+           IDENT_TABLE[b4] != 0 &&
+           IDENT_TABLE[b5] != 0 &&
+           IDENT_TABLE[b6] != 0 &&
+           IDENT_TABLE[b7] != 0 {
+            i += 8;
+        } else {
+            // find exactly where it stopped
+            if IDENT_TABLE[b0] == 0 { break }
+            i += 1;
+            if IDENT_TABLE[b1] == 0 { break }
+            i += 1;
+            if IDENT_TABLE[b2] == 0 { break }
+            i += 1;
+            if IDENT_TABLE[b3] == 0 { break }
+            i += 1;
+            if IDENT_TABLE[b4] == 0 { break }
+            i += 1;
+            if IDENT_TABLE[b5] == 0 { break }
+            i += 1;
+            if IDENT_TABLE[b6] == 0 { break }
+            i += 1;
+            if IDENT_TABLE[b7] == 0 { break }
+            i += 1;
+            break;
         }
     }
+
+    // Handle remaining bytes
+    while i < bytes.len() && IDENT_TABLE[bytes[i] as usize] != 0 {
+        i += 1;
+    }
+
     (&s[..i], &s[i..])
 }
 
 #[inline]
 pub fn take_hex(s: &str) -> (&str, &str) {
     let bytes = s.as_bytes();
+    if bytes.is_empty() { return ("", s) }
+
     let mut i = 0;
-    if matches!(bytes.first(), Some(b'+') | Some(b'-')) { i += 1 }
-    while i < bytes.len() && bytes[i].is_ascii_hexdigit() {
-        i += 1
+
+    // branchless sign check
+    let has_sign = bytes[0] == b'+' || bytes[0] == b'-';
+    i += has_sign as usize;
+
+    // SIMD-like 8 bytes at once
+    while i + 8 <= bytes.len() {
+        let chunk = unsafe {
+            ptr::read_unaligned(bytes.as_ptr().add(i) as *const u64).to_le()
+        };
+
+        let b0 = ((chunk >>  0) & 0xFF) as usize;
+        let b1 = ((chunk >>  8) & 0xFF) as usize;
+        let b2 = ((chunk >> 16) & 0xFF) as usize;
+        let b3 = ((chunk >> 24) & 0xFF) as usize;
+        let b4 = ((chunk >> 32) & 0xFF) as usize;
+        let b5 = ((chunk >> 40) & 0xFF) as usize;
+        let b6 = ((chunk >> 48) & 0xFF) as usize;
+        let b7 = ((chunk >> 56) & 0xFF) as usize;
+
+        // check if all are hex digits (mask 2 or 3)
+        if (DIGIT_TABLE[b0] & 2) != 0 &&
+           (DIGIT_TABLE[b1] & 2) != 0 &&
+           (DIGIT_TABLE[b2] & 2) != 0 &&
+           (DIGIT_TABLE[b3] & 2) != 0 &&
+           (DIGIT_TABLE[b4] & 2) != 0 &&
+           (DIGIT_TABLE[b5] & 2) != 0 &&
+           (DIGIT_TABLE[b6] & 2) != 0 &&
+           (DIGIT_TABLE[b7] & 2) != 0 {
+            i += 8;
+        } else {
+            // fInd where it stops
+            if (DIGIT_TABLE[b0] & 2) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b1] & 2) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b2] & 2) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b3] & 2) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b4] & 2) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b5] & 2) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b6] & 2) == 0 { break }
+            i += 1;
+            if (DIGIT_TABLE[b7] & 2) == 0 { break }
+            i += 1;
+            break;
+        }
     }
+
+    while i < bytes.len() && (DIGIT_TABLE[bytes[i] as usize] & 2) != 0 {
+        i += 1;
+    }
+
     (&s[..i], &s[i..])
 }
 
 #[inline]
 pub fn take_signed(s: &str) -> (&str, &str) {
     let bytes = s.as_bytes();
+    if bytes.is_empty() { return ("", s); }
+
     let mut i = 0;
-    if matches!(bytes.first(), Some(b'+') | Some(b'-')) { i += 1 }
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
+
+    // branchless sign check
+    let has_sign = bytes[0] == b'+' || bytes[0] == b'-';
+    i += has_sign as usize;
+
+    // SIMD-like 8 bytes at once
+    while i + 8 <= bytes.len() {
+        let chunk = unsafe {
+            ptr::read_unaligned(bytes.as_ptr().add(i) as *const u64).to_le()
+        };
+
+        // SWAR trick
+        // check if all bytes are in range b'0'..=b'9'
+        let all_digits =
+            (chunk.wrapping_sub(0x3030303030303030)) & 0x8080808080808080 == 0 &&
+            (chunk | 0x2020202020202020).wrapping_sub(0x3A3A3A3A3A3A3A3A) & 0x8080808080808080 == 0x8080808080808080;
+
+        if all_digits {
+            i += 8
+        } else {
+            for b in chunk.to_le_bytes() {
+                if b >= b'0' && b <= b'9' {
+                    i += 1;
+                } else {
+                    break
+                }
+            }
+
+            break
+        }
+    }
+
+    while i < bytes.len() && bytes[i] >= b'0' && bytes[i] <= b'9' {
         i += 1
     }
+
     (&s[..i], &s[i..])
 }
 
