@@ -16,10 +16,9 @@ use brik::rv64::I64;
 use brik::rv32::I32;
 use brik::rv32::Reg::*;
 use brik::asm::Assembler;
-use brik::asm::label::LabelId;
 use brik::asm::errors::FinishError;
 use brik::object::{SymbolKind, SymbolScope};
-use brik::object::write::{Object, Symbol, SymbolId};
+use brik::object::write::{Object, SymbolId};
 
 use anyhow::{bail, Result};
 
@@ -53,113 +52,6 @@ impl<'a> Encoder<'a> {
     #[inline(always)]
     pub fn finish(self) -> Result<Object<'a>, FinishError> {
         self.0.finish()
-    }
-
-    #[inline(always)]
-    pub fn make_sym_global(&mut self, sym_id: SymbolId) {
-        self.edit_sym(sym_id, |s| s.scope = SymbolScope::Dynamic)
-    }
-
-    #[inline(always)]
-    pub fn edit_sym<R>(
-        &mut self,
-        sym_id: SymbolId,
-        f: impl FnOnce(&mut Symbol) -> R
-    ) -> R {
-        let sym = self.symbol_mut(sym_id);
-        f(sym)
-    }
-
-    #[inline]
-    pub fn edit_or_add_sym_and_edit_it<R>(
-        &mut self,
-        name: impl AsRef<[u8]>,
-        f: impl FnOnce(&mut Symbol) -> R
-    ) -> R {
-        let sym_id = self.symbol_id(name.as_ref()).unwrap_or_else(|| {
-            self.add_symbol_extern(
-                name,
-                SymbolKind::Text,
-                SymbolScope::Dynamic
-            )
-        });
-
-        self.edit_sym(sym_id, f)
-    }
-
-    #[inline]
-    pub fn place_or_add_label_here(
-        &mut self,
-        name: impl AsRef<[u8]>,
-        kind: SymbolKind,
-        scope: SymbolScope
-    ) -> LabelId {
-        if let Some(lbl_id) = self.get_label_id(&name) {
-            self.place_label_here(lbl_id);
-            lbl_id
-        } else if let Some(sym_id) = self.symbol_id(name.as_ref()) {
-            let s = self.symbol_mut(sym_id);
-            s.kind  = kind;
-            s.scope = scope;
-            self.add_label(name, sym_id)
-        } else {
-            self.add_label_here(name, kind, scope)
-        }
-    }
-
-    #[inline]
-    pub fn get_or_declare_label(
-        &mut self,
-        name: impl AsRef<[u8]>,
-        kind: SymbolKind,
-        scope: SymbolScope
-    ) -> LabelId {
-        if let Some(lbl_id) = self.get_label_id(&name) {
-            lbl_id
-        } else if let Some(sym_id) = self.symbol_id(name.as_ref()) {
-            let s = self.symbol_mut(sym_id);
-            s.kind  = kind;
-            s.scope = scope;
-            self.add_label(name, sym_id)
-        } else {
-            self.declare_label(name, kind, scope)
-        }
-    }
-
-    #[allow(unused)]
-    #[inline(always)]
-    pub fn edit_label_sym<R>(
-        &mut self,
-        lbl_id: LabelId,
-        f: impl FnOnce(&mut Symbol) -> R
-    ) -> R {
-        let sym_id = self.get_label(lbl_id).sym;
-        self.edit_sym(sym_id, f)
-    }
-
-    #[inline(always)]
-    pub fn edit_curr_label_sym<R>(
-        &mut self,
-        f: impl FnOnce(&mut Symbol) -> R
-    ) -> R {
-        let lbl_id = self.expect_curr_label();
-        self.edit_label_sym(lbl_id, f)
-    }
-
-    #[inline(always)]
-    pub fn make_label_global(&mut self, lbl_id: LabelId) {
-        let sym_id = self.get_label(lbl_id).sym;
-        self.make_sym_global(sym_id);
-    }
-
-    #[allow(unused)]
-    #[inline(always)]
-    pub fn make_current_label_global(&mut self) {
-        let Some(lbl_id) = self.get_curr_label() else {
-            return
-        };
-
-        self.make_label_global(lbl_id);
     }
 
     pub fn encode_inst(
