@@ -101,7 +101,7 @@ pub fn take_string(s: &str) -> (&str, &str) {
     }
 
     if let Some(end) = memchr(b'"', &bytes[1..]) {
-        let total_len = end + 2;
+        let total_len = end + 1;
         (&s[..total_len], &s[total_len..])
     } else {
         (s, "")
