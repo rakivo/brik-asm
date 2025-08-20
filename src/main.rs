@@ -8,9 +8,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::{fs, io, str};
 use std::path::{Path, PathBuf};
 
-use clap::Parser;
-use anyhow::{Context, Result};
-
 use brik::asm::Assembler;
 use brik::asm::arch::Arch;
 use brik::object::{
@@ -18,6 +15,9 @@ use brik::object::{
     Endianness,
     BinaryFormat,
 };
+
+use clap::Parser;
+use anyhow::{Context, Result};
 
 #[macro_use]
 mod util;

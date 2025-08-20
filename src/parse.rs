@@ -157,6 +157,59 @@ pub fn take_number(s: &str) -> (&str, &str) {
                     i += mask.trailing_zeros() as usize;
                     break
                 }
+            } else if #[cfg(target_arch = "aarch64")] {
+                use std::arch::aarch64::*;
+
+                let mask = unsafe {
+                    // load bytes into a 8x8-bit vector
+                    let mut buf = [0u8; 16];
+                    buf[..8].copy_from_slice(&chunk.to_le_bytes());
+                    let bytes = vld1q_u8(buf.as_ptr());
+
+                    // decimal check '0'..='9'
+                    let dec_lo = vcltq_u8(bytes, vdupq_n_u8(b'0'));
+                    let dec_hi = vcgtq_u8(bytes, vdupq_n_u8(b'9'));
+                    let dec_invalid = vorrq_u8(dec_lo, dec_hi);
+                    let mut invalid = dec_invalid;
+
+                    if is_hex {
+                        // lowercase hex 'a'..='f'
+                        let lo_lo = vcltq_u8(bytes, vdupq_n_u8(b'a'));
+                        let lo_hi = vcgtq_u8(bytes, vdupq_n_u8(b'f'));
+                        let lower_invalid = vorrq_u8(lo_lo, lo_hi);
+
+                        // uppercase hex 'A'..='F'
+                        let up_lo = vcltq_u8(bytes, vdupq_n_u8(b'A'));
+                        let up_hi = vcgtq_u8(bytes, vdupq_n_u8(b'F'));
+                        let upper_invalid = vorrq_u8(up_lo, up_hi);
+
+                        let lower_valid = vbicq_u8(vdupq_n_u8(0xFF), lower_invalid);
+                        let upper_valid = vbicq_u8(vdupq_n_u8(0xFF), upper_invalid);
+                        let hex_valid = vorrq_u8(lower_valid, upper_valid);
+
+                        let dec_valid = vbicq_u8(vdupq_n_u8(0xFF), dec_invalid);
+                        let all_valid = vorrq_u8(dec_valid, hex_valid);
+
+                        invalid = vceqq_u8(all_valid, vdupq_n_u8(0));
+                    }
+
+                    let mut arr = [0u8; 16];
+                    vst1q_u8(arr.as_mut_ptr(), invalid);
+
+                    // extract mask (aarch64 doesn't have _mm_movemask_epi8)
+                    let mut mask = 0u32;
+                    for i in 0..8 {
+                        mask |= ((arr[i] >> 7) as u32) << i;
+                    } mask
+                };
+
+                if mask == 0 {
+                    i += 8
+                } else {
+                    // first failing byte index
+                    i += mask.trailing_zeros() as usize;
+                    break
+                }
             } else {
                 let b0 = ((chunk >>  0) & 0xFF) as usize;
                 let b1 = ((chunk >>  8) & 0xFF) as usize;
@@ -269,6 +322,62 @@ pub fn take_ident(s: &str) -> (&str, &str) {
                     i += mask.trailing_zeros() as usize;
                     break
                 }
+            } else if #[cfg(target_arch = "aarch64")] {
+                use std::arch::aarch64::*;
+
+                // Z-a or '_' or 0-9
+
+                let mask = unsafe {
+                    // load bytes into a 8x8-bit vector
+                    let mut buf = [0u8; 16];
+                    buf[..8].copy_from_slice(&chunk.to_le_bytes());
+                    let bytes = vld1q_u8(buf.as_ptr());
+
+                    // decimal check '0'..='9'
+                    let num_lo = vcltq_u8(bytes, vdupq_n_u8(b'0'));
+                    let num_hi = vcgtq_u8(bytes, vdupq_n_u8(b'9'));
+                    let num_invalid = vorrq_u8(num_lo, num_hi);
+                    let num_valid = vbicq_u8(vdupq_n_u8(0xFF), num_invalid);
+
+                    // ----- lowercase letters: 'a'..='z' -----
+                    let lo_lo = vcltq_u8(bytes, vdupq_n_u8(b'a'));
+                    let lo_hi = vcgtq_u8(bytes, vdupq_n_u8(b'z'));
+                    let lower_invalid = vorrq_u8(lo_lo, lo_hi);
+
+                    // ----- uppercase letters: 'A'..='Z' -----
+                    let up_lo = vcltq_u8(bytes, vdupq_n_u8(b'A'));
+                    let up_hi = vcgtq_u8(bytes, vdupq_n_u8(b'Z'));
+                    let upper_invalid = vorrq_u8(up_lo, up_hi);
+
+                    // ----- underscore '_' -----
+                    let uscore_valid = vceqq_u8(bytes, vdupq_n_u8(b'_'));
+
+                    let lower_valid = vbicq_u8(vdupq_n_u8(0xFF), lower_invalid);
+                    let upper_valid = vbicq_u8(vdupq_n_u8(0xFF), upper_invalid);
+
+                    // combine: digit OR letter OR underscore
+                    let letter_valid = vorrq_u8(lower_valid, upper_valid);
+                    let all_valid = vorrq_u8(num_valid, vorrq_u8(letter_valid, uscore_valid));
+
+                    let invalid = vceqq_u8(all_valid, vdupq_n_u8(0));
+
+                    let mut arr = [0u8; 16];
+                    vst1q_u8(arr.as_mut_ptr(), invalid);
+
+                    // extract mask (aarch64 doesn't have _mm_movemask_epi8)
+                    let mut mask = 0u32;
+                    for i in 0..8 {
+                        mask |= ((arr[i] >> 7) as u32) << i;
+                    } mask
+                };
+
+                if mask == 0 {
+                    i += 8
+                } else {
+                    // first failing byte index
+                    i += mask.trailing_zeros() as usize;
+                    break
+                }
             } else {
                 let b0 = ((chunk >>  0) & 0xFF) as usize;
                 let b1 = ((chunk >>  8) & 0xFF) as usize;
@@ -371,6 +480,56 @@ pub fn take_hex(s: &str) -> (&str, &str) {
                     let invalid = _mm_cmpeq_epi8(all_valid, _mm_setzero_si128());
 
                     (_mm_movemask_epi8(invalid) & 0xFF) as u32
+                };
+
+                if mask == 0 {
+                    i += 8
+                } else {
+                    // first failing byte index
+                    i += mask.trailing_zeros() as usize;
+                    break
+                }
+            } else if #[cfg(target_arch = "aarch64")] {
+                use std::arch::aarch64::*;
+
+                let mask = unsafe {
+                    // load bytes into a 8x8-bit vector
+                    let mut buf = [0u8; 16];
+                    buf[..8].copy_from_slice(&chunk.to_le_bytes());
+                    let bytes = vld1q_u8(buf.as_ptr());
+
+                    // decimal check '0'..='9'
+                    let dec_lo = vcltq_u8(bytes, vdupq_n_u8(b'0'));
+                    let dec_hi = vcgtq_u8(bytes, vdupq_n_u8(b'9'));
+                    let dec_invalid = vorrq_u8(dec_lo, dec_hi);
+
+                    // lowercase hex 'a'..='f'
+                    let lo_lo = vcltq_u8(bytes, vdupq_n_u8(b'a'));
+                    let lo_hi = vcgtq_u8(bytes, vdupq_n_u8(b'f'));
+                    let lower_invalid = vorrq_u8(lo_lo, lo_hi);
+
+                    // uppercase hex 'A'..='F'
+                    let up_lo = vcltq_u8(bytes, vdupq_n_u8(b'A'));
+                    let up_hi = vcgtq_u8(bytes, vdupq_n_u8(b'F'));
+                    let upper_invalid = vorrq_u8(up_lo, up_hi);
+
+                    let lower_valid = vbicq_u8(vdupq_n_u8(0xFF), lower_invalid);
+                    let upper_valid = vbicq_u8(vdupq_n_u8(0xFF), upper_invalid);
+                    let hex_valid = vorrq_u8(lower_valid, upper_valid);
+
+                    let dec_valid = vbicq_u8(vdupq_n_u8(0xFF), dec_invalid);
+                    let all_valid = vorrq_u8(dec_valid, hex_valid);
+
+                    let invalid = vceqq_u8(all_valid, vdupq_n_u8(0));
+
+                    let mut arr = [0u8; 16];
+                    vst1q_u8(arr.as_mut_ptr(), invalid);
+
+                    // extract mask (aarch64 doesn't have _mm_movemask_epi8)
+                    let mut mask = 0u32;
+                    for i in 0..8 {
+                        mask |= ((arr[i] >> 7) as u32) << i;
+                    } mask
                 };
 
                 if mask == 0 {
