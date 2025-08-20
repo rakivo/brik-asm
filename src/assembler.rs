@@ -4,8 +4,8 @@ use crate::parse::{
     parse_i,
     with_cs_list,
     take_string,
-    strip_comment,
     split_at_space,
+    skip_whitespace
 };
 
 use std::path::Path;
@@ -62,25 +62,34 @@ impl<'a> Assembler<'a> {
 
         let mut byte_offset = 0;
 
+        let path_display = path.display().to_string();
+
         for nl in Memchr::new(b'\n', src.as_bytes()) {
             let line = &src[byte_offset..nl];
 
             byte_offset = nl + 1;
             self.line_number += 1;
 
-            let line = line.trim();
+            let line = line.strip_suffix('\n').unwrap_or(line);
+            let line = &line[skip_whitespace(line)..];
 
-            let Some(&first_byte) = line.as_bytes().first() else {
-                continue
-            };
+            if line.is_empty() {
+                continue;
+            }
+
+            let line_bytes = line.as_bytes();
+            let first_byte = *unsafe { line_bytes.get_unchecked(0) };
 
             if first_byte == b';' { continue }
 
-            let line = strip_comment(line).trim();
+            let line = match line.rfind(';') {
+                Some(pos) => line[..pos].trim_end(),
+                None => line
+            };
 
             if line.is_empty() { continue }
 
-            if matches!(line.as_bytes().last(), Some(b':')) {
+            if line_bytes[line_bytes.len() - 1] == b':' {
                 let lbl = &line[..line.len() - 1].trim();
 
                 if lbl.is_empty() {
@@ -102,15 +111,14 @@ impl<'a> Assembler<'a> {
                     SymbolScope::Compilation
                 );
 
-                // should we intern labels as well?!
+                // should we intern labels as well?
                 // self.enc.intern_label(lbl, lbl_id);
 
                 continue
             }
 
             let fl_context = |asm: &Self| format!{
-                "{f}:{l}:",
-                f = path.display(),
+                "{path_display}:{l}:",
                 l = asm.line_number
             };
 
@@ -144,22 +152,35 @@ impl<'a> Assembler<'a> {
         path: &Path,
         line: &str
     ) -> anyhow::Result<()> {
-        let (dir, rest) = split_at_space(line);
+        let line_bytes = line.as_bytes();
+        let path_display = path.display();
+
+        // Find space position once
+        let space_pos = line_bytes
+            .iter()
+            .position(|&b| b == b' ')
+            .unwrap_or(line.len());
+
+        let directive = &line_bytes[1..space_pos];
+        let rest = if space_pos < line.len() {
+            line[space_pos + 1..].trim_start()
+        } else {
+            ""
+        };
 
         let get_name = || {
-            let name = rest.trim();
-            if name.is_empty() {
+            if rest.is_empty() {
                 bail_at!{
-                    path.display(),
+                    path_display,
                     self.line_number,
                     "expected section name"
                 }
             }
 
-            Ok(name)
+            Ok(rest)
         };
 
-        match &dir.as_bytes()[1..] {
+        match directive {
             b"text"   => self.enc.position_at_end(self.sections.text),
             b"data"   => self.enc.position_at_end(self.sections.data),
             b"rodata" => self.enc.position_at_end(self.sections.rodata),
@@ -198,7 +219,7 @@ impl<'a> Assembler<'a> {
                     SymbolScope::Compilation
                 );
                 self.enc.make_label_global(lbl_id);
-                // should we intern labels as well?!
+                // should we intern labels as well?
                 // self.enc.intern_label(name, lbl_id);
             }
 
@@ -253,7 +274,16 @@ impl<'a> Assembler<'a> {
                 self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
             }
 
-            _ => bail_at!(path.display(), self.line_number, "unknown directive {dir}")
+            _ => {
+                let dir_str = str::from_utf8(directive)
+                    .unwrap_or("<invalid utf8>");
+
+                bail_at!{
+                    path_display,
+                    self.line_number,
+                    "unknown directive .{dir_str}"
+                }
+            }
         }
 
         Ok(())

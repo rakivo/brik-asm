@@ -81,15 +81,6 @@ pub fn split_at_space(s: &str) -> (&str, &str) {
     }
 }
 
-#[inline(always)]
-pub fn strip_comment(s: &str) -> &str {
-    if let Some(idx) = s.bytes().rposition(|b| b == b';') {
-        &s[..idx]
-    } else {
-        s
-    }
-}
-
 #[inline]
 pub fn take_number(s: &str) -> (&str, &str) {
     let bytes = s.as_bytes();
