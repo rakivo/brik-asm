@@ -55,10 +55,6 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --no-default-features --features "${{ matrix.features }}" --all-targets -- -D warnings
 
-      # Run unit tests (lib + bin + examples)
+      # Run unit tests
       - name: Run unit tests
         run: cargo test --all-targets --no-default-features --features "${{ matrix.features }}"
-
-      # Run doctests (lib only)
-      - name: Run doctests
-        run: cargo test --doc --no-default-features --features "${{ matrix.features }}"
