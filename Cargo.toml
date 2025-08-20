@@ -11,9 +11,9 @@ memmap2 = { version = "=0.9.7",   default-features = false }
 brik = { git = "https://github.com/rakivo/brik", rev = "83f24d7" }
 libc = { version = "0.2.175", optional = true } # madvise
 num-traits = "0.2.19"
-crc32fast = { version = "1.5.0", features = ["std"] }
 mimalloc = "0.1.47"
 cfg-if = "1.0.3"
+xxhash-rust = { version = "0.8.12", features = ["xxh64"] }
 
 [features]
 default = ["madvise", "brik-fancy-diagnostics"]
