@@ -1,4 +1,3 @@
-
 use std::{str, fmt, ptr, error};
 
 use brik::rv32::{Reg, AqRl};
@@ -615,7 +614,7 @@ pub fn take_signed(s: &str) -> (&str, &str) {
             i += 8
         } else {
             for b in chunk.to_le_bytes() {
-                if b >= b'0' && b <= b'9' {
+                if b.is_ascii_digit() {
                     i += 1;
                 } else {
                     break

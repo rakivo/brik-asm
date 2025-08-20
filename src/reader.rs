@@ -23,6 +23,7 @@ pub fn with_file<R>(
     let ret = if file_size < MMAP_THRESHOLD {
         let mut buf = Vec::with_capacity(file_size);
 
+        #[allow(clippy::uninit_vec)]
         // to not initialize buf with zeroes
         unsafe { buf.set_len(file_size); }
 
