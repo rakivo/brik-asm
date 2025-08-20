@@ -108,52 +108,99 @@ pub fn take_number(s: &str) -> (&str, &str) {
     // 3 = decimal+hex, 2 = hex only
     let digit_mask = if is_hex { 2 } else { 3 };
 
-    // SIMD-like 8 bytes at once
     while i + 8 <= bytes.len() {
         let chunk = unsafe {
-            // Load 8 bytes as u64 for fast processing
+            // load 8 bytes as u64
             ptr::read_unaligned(bytes.as_ptr().add(i) as *const u64).to_le()
         };
 
-        let b0 = ((chunk >>  0) & 0xFF) as usize;
-        let b1 = ((chunk >>  8) & 0xFF) as usize;
-        let b2 = ((chunk >> 16) & 0xFF) as usize;
-        let b3 = ((chunk >> 24) & 0xFF) as usize;
-        let b4 = ((chunk >> 32) & 0xFF) as usize;
-        let b5 = ((chunk >> 40) & 0xFF) as usize;
-        let b6 = ((chunk >> 48) & 0xFF) as usize;
-        let b7 = ((chunk >> 56) & 0xFF) as usize;
+        cfg_if::cfg_if!{
+            if #[cfg(target_feature = "sse2")] {
+                use std::arch::x86_64::*;
 
-        // TODO(#3): use actual SIMD here
-        // check all 8 bytes at once
-        if (DIGIT_TABLE[b0] & digit_mask) != 0 &&
-           (DIGIT_TABLE[b1] & digit_mask) != 0 &&
-           (DIGIT_TABLE[b2] & digit_mask) != 0 &&
-           (DIGIT_TABLE[b3] & digit_mask) != 0 &&
-           (DIGIT_TABLE[b4] & digit_mask) != 0 &&
-           (DIGIT_TABLE[b5] & digit_mask) != 0 &&
-           (DIGIT_TABLE[b6] & digit_mask) != 0 &&
-           (DIGIT_TABLE[b7] & digit_mask) != 0 {
-            i += 8;
-        } else {
-            // find exactly where it stopped
-            if (DIGIT_TABLE[b0] & digit_mask) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b1] & digit_mask) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b2] & digit_mask) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b3] & digit_mask) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b4] & digit_mask) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b5] & digit_mask) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b6] & digit_mask) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b7] & digit_mask) == 0 { break }
-            i += 1;
-            break;
+                let mask = unsafe {
+                    let bytes = _mm_cvtsi64_si128(chunk as _);
+
+                    // -------- decimal: '0'..='9' --------
+                    let dec_lo = _mm_cmplt_epi8(bytes, _mm_set1_epi8(b'0' as i8));
+                    let dec_hi = _mm_cmpgt_epi8(bytes, _mm_set1_epi8(b'9' as i8));
+                    let dec_invalid = _mm_or_si128(dec_lo, dec_hi);
+                    let mut invalid = dec_invalid;
+
+                    if is_hex {
+                        // ----- lowercase hex: 'a'..='f' -----
+                        let lo_lo = _mm_cmplt_epi8(bytes, _mm_set1_epi8(b'a' as i8));
+                        let lo_hi = _mm_cmpgt_epi8(bytes, _mm_set1_epi8(b'f' as i8));
+                        let lower_invalid = _mm_or_si128(lo_lo, lo_hi);
+
+                        // ----- uppercase hex: 'A'..='F' ------
+                        let up_lo = _mm_cmplt_epi8(bytes, _mm_set1_epi8(b'A' as i8));
+                        let up_hi = _mm_cmpgt_epi8(bytes, _mm_set1_epi8(b'F' as i8));
+                        let upper_invalid = _mm_or_si128(up_lo, up_hi);
+
+                        // valid_hex = !lower_invalid || !upper_invalid
+                        let lower_valid = _mm_andnot_si128(lower_invalid, _mm_set1_epi8(-1));
+                        let upper_valid = _mm_andnot_si128(upper_invalid, _mm_set1_epi8(-1));
+                        let hex_valid = _mm_or_si128(lower_valid, upper_valid);
+
+                        // valid = decimal_ok || hex_ok
+                        let dec_valid = _mm_andnot_si128(dec_invalid, _mm_set1_epi8(-1));
+                        let all_valid = _mm_or_si128(dec_valid, hex_valid);
+
+                        invalid = _mm_cmpeq_epi8(all_valid, _mm_setzero_si128());
+                    }
+
+                    // return mask of invalid bytes (MSB 1 -> bad)
+                    (_mm_movemask_epi8(invalid) & 0xFF) as u32
+                };
+
+                if mask == 0 {
+                    i += 8
+                } else {
+                    // first failing byte index
+                    i += mask.trailing_zeros() as usize;
+                    break
+                }
+            } else {
+                let b0 = ((chunk >>  0) & 0xFF) as usize;
+                let b1 = ((chunk >>  8) & 0xFF) as usize;
+                let b2 = ((chunk >> 16) & 0xFF) as usize;
+                let b3 = ((chunk >> 24) & 0xFF) as usize;
+                let b4 = ((chunk >> 32) & 0xFF) as usize;
+                let b5 = ((chunk >> 40) & 0xFF) as usize;
+                let b6 = ((chunk >> 48) & 0xFF) as usize;
+                let b7 = ((chunk >> 56) & 0xFF) as usize;
+
+                if (DIGIT_TABLE[b0] & digit_mask) != 0 &&
+                   (DIGIT_TABLE[b1] & digit_mask) != 0 &&
+                   (DIGIT_TABLE[b2] & digit_mask) != 0 &&
+                   (DIGIT_TABLE[b3] & digit_mask) != 0 &&
+                   (DIGIT_TABLE[b4] & digit_mask) != 0 &&
+                   (DIGIT_TABLE[b5] & digit_mask) != 0 &&
+                   (DIGIT_TABLE[b6] & digit_mask) != 0 &&
+                   (DIGIT_TABLE[b7] & digit_mask) != 0 {
+                    i += 8;
+                } else {
+                    // find exactly where it stopped
+                    if (DIGIT_TABLE[b0] & digit_mask) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b1] & digit_mask) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b2] & digit_mask) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b3] & digit_mask) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b4] & digit_mask) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b5] & digit_mask) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b6] & digit_mask) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b7] & digit_mask) == 0 { break }
+                    i += 1;
+                    break
+                }
+            }
         }
     }
 
@@ -169,63 +216,109 @@ pub fn take_ident(s: &str) -> (&str, &str) {
     let bytes = s.as_bytes();
     if bytes.is_empty() { return ("", s) }
 
-    // Fast first character check
+    // if first byte is not A-z or '_' -> invalid
     if IDENT_TABLE[bytes[0] as usize] & 1 == 0 {
         return ("", s)
     }
 
     let mut i = 1;
 
-    // SIMD-like 8 bytes at once
     while i + 8 <= bytes.len() {
         let chunk = unsafe {
             ptr::read_unaligned(bytes.as_ptr().add(i) as *const u64).to_le()
         };
 
-        let b0 = ((chunk >>  0) & 0xFF) as usize;
-        let b1 = ((chunk >>  8) & 0xFF) as usize;
-        let b2 = ((chunk >> 16) & 0xFF) as usize;
-        let b3 = ((chunk >> 24) & 0xFF) as usize;
-        let b4 = ((chunk >> 32) & 0xFF) as usize;
-        let b5 = ((chunk >> 40) & 0xFF) as usize;
-        let b6 = ((chunk >> 48) & 0xFF) as usize;
-        let b7 = ((chunk >> 56) & 0xFF) as usize;
+        cfg_if::cfg_if!{
+            if #[cfg(target_feature = "sse2")] {
+                use std::arch::x86_64::*;
 
-        // check if all are valid identifier chars (first or non-first)
-        if IDENT_TABLE[b0] != 0 &&
-           IDENT_TABLE[b1] != 0 &&
-           IDENT_TABLE[b2] != 0 &&
-           IDENT_TABLE[b3] != 0 &&
-           IDENT_TABLE[b4] != 0 &&
-           IDENT_TABLE[b5] != 0 &&
-           IDENT_TABLE[b6] != 0 &&
-           IDENT_TABLE[b7] != 0 {
-            i += 8;
-        } else {
-            // find exactly where it stopped
-            if IDENT_TABLE[b0] == 0 { break }
-            i += 1;
-            if IDENT_TABLE[b1] == 0 { break }
-            i += 1;
-            if IDENT_TABLE[b2] == 0 { break }
-            i += 1;
-            if IDENT_TABLE[b3] == 0 { break }
-            i += 1;
-            if IDENT_TABLE[b4] == 0 { break }
-            i += 1;
-            if IDENT_TABLE[b5] == 0 { break }
-            i += 1;
-            if IDENT_TABLE[b6] == 0 { break }
-            i += 1;
-            if IDENT_TABLE[b7] == 0 { break }
-            i += 1;
-            break;
+                // Z-a or '_' or 0-9
+
+                let mask = unsafe {
+                    let bytes = _mm_cvtsi64_si128(chunk as i64);
+
+                    // ----- digits: '0'..='9' -----
+                    let num_lo = _mm_cmplt_epi8(bytes, _mm_set1_epi8(b'0' as i8));
+                    let num_hi = _mm_cmpgt_epi8(bytes, _mm_set1_epi8(b'9' as i8));
+                    let num_invalid = _mm_or_si128(num_lo, num_hi);
+                    let num_valid = _mm_andnot_si128(num_invalid, _mm_set1_epi8(-1));
+
+                    // ----- lowercase letters: 'a'..='z' -----
+                    let lo_lo = _mm_cmplt_epi8(bytes, _mm_set1_epi8(b'a' as i8));
+                    let lo_hi = _mm_cmpgt_epi8(bytes, _mm_set1_epi8(b'z' as i8));
+                    let lower_invalid = _mm_or_si128(lo_lo, lo_hi);
+                    let lower_valid = _mm_andnot_si128(lower_invalid, _mm_set1_epi8(-1));
+
+                    // ----- uppercase letters: 'A'..='Z' -----
+                    let up_lo = _mm_cmplt_epi8(bytes, _mm_set1_epi8(b'A' as i8));
+                    let up_hi = _mm_cmpgt_epi8(bytes, _mm_set1_epi8(b'Z' as i8));
+                    let upper_invalid = _mm_or_si128(up_lo, up_hi);
+                    let upper_valid = _mm_andnot_si128(upper_invalid, _mm_set1_epi8(-1));
+
+                    // ----- underscore '_' -----
+                    let uscore_valid = _mm_cmpeq_epi8(bytes, _mm_set1_epi8(b'_' as i8));
+
+                    // combine: digit OR letter OR underscore
+                    let letter_valid = _mm_or_si128(lower_valid, upper_valid);
+                    let all_valid = _mm_or_si128(num_valid, _mm_or_si128(letter_valid, uscore_valid));
+
+                    let invalid = _mm_cmpeq_epi8(all_valid, _mm_setzero_si128());
+
+                    (_mm_movemask_epi8(invalid) & 0xFF) as u32
+                };
+
+                if mask == 0 {
+                    i += 8;
+                } else {
+                    i += mask.trailing_zeros() as usize;
+                    break
+                }
+            } else {
+                let b0 = ((chunk >>  0) & 0xFF) as usize;
+                let b1 = ((chunk >>  8) & 0xFF) as usize;
+                let b2 = ((chunk >> 16) & 0xFF) as usize;
+                let b3 = ((chunk >> 24) & 0xFF) as usize;
+                let b4 = ((chunk >> 32) & 0xFF) as usize;
+                let b5 = ((chunk >> 40) & 0xFF) as usize;
+                let b6 = ((chunk >> 48) & 0xFF) as usize;
+                let b7 = ((chunk >> 56) & 0xFF) as usize;
+
+                // check if all are valid identifier chars (first or non-first)
+                if IDENT_TABLE[b0] != 0 &&
+                   IDENT_TABLE[b1] != 0 &&
+                   IDENT_TABLE[b2] != 0 &&
+                   IDENT_TABLE[b3] != 0 &&
+                   IDENT_TABLE[b4] != 0 &&
+                   IDENT_TABLE[b5] != 0 &&
+                   IDENT_TABLE[b6] != 0 &&
+                   IDENT_TABLE[b7] != 0 {
+                    i += 8;
+                } else {
+                    // find exactly where it stopped
+                    if IDENT_TABLE[b0] == 0 { break }
+                    i += 1;
+                    if IDENT_TABLE[b1] == 0 { break }
+                    i += 1;
+                    if IDENT_TABLE[b2] == 0 { break }
+                    i += 1;
+                    if IDENT_TABLE[b3] == 0 { break }
+                    i += 1;
+                    if IDENT_TABLE[b4] == 0 { break }
+                    i += 1;
+                    if IDENT_TABLE[b5] == 0 { break }
+                    i += 1;
+                    if IDENT_TABLE[b6] == 0 { break }
+                    i += 1;
+                    if IDENT_TABLE[b7] == 0 { break }
+                    i += 1;
+                    break
+                }
+            }
         }
     }
 
-    // Handle remaining bytes
     while i < bytes.len() && IDENT_TABLE[bytes[i] as usize] != 0 {
-        i += 1;
+        i += 1
     }
 
     (&s[..i], &s[i..])
@@ -248,44 +341,89 @@ pub fn take_hex(s: &str) -> (&str, &str) {
             ptr::read_unaligned(bytes.as_ptr().add(i) as *const u64).to_le()
         };
 
-        let b0 = ((chunk >>  0) & 0xFF) as usize;
-        let b1 = ((chunk >>  8) & 0xFF) as usize;
-        let b2 = ((chunk >> 16) & 0xFF) as usize;
-        let b3 = ((chunk >> 24) & 0xFF) as usize;
-        let b4 = ((chunk >> 32) & 0xFF) as usize;
-        let b5 = ((chunk >> 40) & 0xFF) as usize;
-        let b6 = ((chunk >> 48) & 0xFF) as usize;
-        let b7 = ((chunk >> 56) & 0xFF) as usize;
+        cfg_if::cfg_if!{
+            if #[cfg(target_feature = "sse2")] {
+                use std::arch::x86_64::*;
 
-        // check if all are hex digits (mask 2 or 3)
-        if (DIGIT_TABLE[b0] & 2) != 0 &&
-           (DIGIT_TABLE[b1] & 2) != 0 &&
-           (DIGIT_TABLE[b2] & 2) != 0 &&
-           (DIGIT_TABLE[b3] & 2) != 0 &&
-           (DIGIT_TABLE[b4] & 2) != 0 &&
-           (DIGIT_TABLE[b5] & 2) != 0 &&
-           (DIGIT_TABLE[b6] & 2) != 0 &&
-           (DIGIT_TABLE[b7] & 2) != 0 {
-            i += 8;
-        } else {
-            // fInd where it stops
-            if (DIGIT_TABLE[b0] & 2) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b1] & 2) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b2] & 2) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b3] & 2) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b4] & 2) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b5] & 2) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b6] & 2) == 0 { break }
-            i += 1;
-            if (DIGIT_TABLE[b7] & 2) == 0 { break }
-            i += 1;
-            break;
+                let mask = unsafe {
+                    let bytes = _mm_cvtsi64_si128(chunk as _);
+
+                    // -------- decimal: '0'..='9' --------
+                    let dec_lo = _mm_cmplt_epi8(bytes, _mm_set1_epi8(b'0' as i8));
+                    let dec_hi = _mm_cmpgt_epi8(bytes, _mm_set1_epi8(b'9' as i8));
+                    let dec_invalid = _mm_or_si128(dec_lo, dec_hi);
+
+                    // ----- lowercase hex: 'a'..='f' -----
+                    let lo_lo = _mm_cmplt_epi8(bytes, _mm_set1_epi8(b'a' as i8));
+                    let lo_hi = _mm_cmpgt_epi8(bytes, _mm_set1_epi8(b'f' as i8));
+                    let lower_invalid = _mm_or_si128(lo_lo, lo_hi);
+
+                    // ----- uppercase hex: 'A'..='F' ------
+                    let up_lo = _mm_cmplt_epi8(bytes, _mm_set1_epi8(b'A' as i8));
+                    let up_hi = _mm_cmpgt_epi8(bytes, _mm_set1_epi8(b'F' as i8));
+                    let upper_invalid = _mm_or_si128(up_lo, up_hi);
+
+                    // valid_hex = !lower_invalid || !upper_invalid
+                    let lower_valid = _mm_andnot_si128(lower_invalid, _mm_set1_epi8(-1));
+                    let upper_valid = _mm_andnot_si128(upper_invalid, _mm_set1_epi8(-1));
+                    let hex_valid = _mm_or_si128(lower_valid, upper_valid);
+
+                    // valid = decimal_ok || hex_ok
+                    let dec_valid = _mm_andnot_si128(dec_invalid, _mm_set1_epi8(-1));
+                    let all_valid = _mm_or_si128(dec_valid, hex_valid);
+
+                    let invalid = _mm_cmpeq_epi8(all_valid, _mm_setzero_si128());
+
+                    (_mm_movemask_epi8(invalid) & 0xFF) as u32
+                };
+
+                if mask == 0 {
+                    i += 8
+                } else {
+                    // first failing byte index
+                    i += mask.trailing_zeros() as usize;
+                    break
+                }
+            } else {
+                let b0 = ((chunk >>  0) & 0xFF) as usize;
+                let b1 = ((chunk >>  8) & 0xFF) as usize;
+                let b2 = ((chunk >> 16) & 0xFF) as usize;
+                let b3 = ((chunk >> 24) & 0xFF) as usize;
+                let b4 = ((chunk >> 32) & 0xFF) as usize;
+                let b5 = ((chunk >> 40) & 0xFF) as usize;
+                let b6 = ((chunk >> 48) & 0xFF) as usize;
+                let b7 = ((chunk >> 56) & 0xFF) as usize;
+
+                if (DIGIT_TABLE[b0] & 2) != 0 &&
+                   (DIGIT_TABLE[b1] & 2) != 0 &&
+                   (DIGIT_TABLE[b2] & 2) != 0 &&
+                   (DIGIT_TABLE[b3] & 2) != 0 &&
+                   (DIGIT_TABLE[b4] & 2) != 0 &&
+                   (DIGIT_TABLE[b5] & 2) != 0 &&
+                   (DIGIT_TABLE[b6] & 2) != 0 &&
+                   (DIGIT_TABLE[b7] & 2) != 0 {
+                    i += 8;
+                } else {
+                    // find exactly where it stopped
+                    if (DIGIT_TABLE[b0] & 2) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b1] & 2) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b2] & 2) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b3] & 2) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b4] & 2) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b5] & 2) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b6] & 2) == 0 { break }
+                    i += 1;
+                    if (DIGIT_TABLE[b7] & 2) == 0 { break }
+                    i += 1;
+                    break
+                }
+            }
         }
     }
 
