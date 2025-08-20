@@ -1,5 +1,6 @@
 // TODO(#2): Properly manage symbol sizes
 
+#[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
