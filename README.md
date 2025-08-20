@@ -18,6 +18,12 @@ $ ./printf
 
 ---
 
+## SIMD
+
+`brik-asm` uses SSE2, AVX2, AVX512BW (if available) on x86-64 and Neon on AArch64 to accelerate parsing
+
+---
+
 ```asm
 .text
 .extern printf
