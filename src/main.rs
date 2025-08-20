@@ -1,4 +1,5 @@
 // TODO(#2): Properly manage symbol sizes
+// TODO(#6): Factor out assembler API into a lib.rs file
 
 #[cfg(feature = "mimalloc-allocator")]
 #[global_allocator]
