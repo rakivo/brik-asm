@@ -1,4 +1,3 @@
-// TODO(#5): Setup github workflows
 // TODO(#2): Properly manage symbol sizes
 
 #[cfg(feature = "mimalloc-allocator")]
