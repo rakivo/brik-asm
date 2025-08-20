@@ -6,22 +6,26 @@ use anyhow::bail;
 use num_traits::Num;
 use memchr::{memchr, memchr2};
 
+const DEC_MASK     : u8 = 1 << 0;
+const HEX_MASK     : u8 = 1 << 1;
+const DECHEX_MASK  : u8 = DEC_MASK | HEX_MASK;
+
 const DIGIT_TABLE: [u8; 256] = const {
-    let mut table = [0u8; 256];
+    let mut table = [0; 256];
     let mut i = 0;
     while i < 256 {
         if i >= b'0' as usize && i <= b'9' as usize {
-            table[i] = 1; // decimal digit
+            table[i] = DEC_MASK; // decimal digit
         } else if (i >= b'a' as usize && i <= b'f' as usize) ||
                   (i >= b'A' as usize && i <= b'F' as usize) {
-            table[i] = 2; // hex digit (also valid decimal)
+            table[i] = HEX_MASK; // hex digit (also valid decimal)
         }
         i += 1;
     }
     // mark decimal digits as both 1 and 2
     i = b'0' as usize;
     while i <= b'9' as usize {
-        table[i] = 3; // both decimal and hex
+        table[i] = DECHEX_MASK; // both decimal and hex
         i += 1;
     }
     table
@@ -105,8 +109,7 @@ pub fn take_number(s: &str) -> (&str, &str) {
 
     if i >= bytes.len() { return (&s[..i], &s[i..]); }
 
-    // 3 = decimal+hex, 2 = hex only
-    let digit_mask = if is_hex { 2 } else { 3 };
+    let digit_mask = 1u8 << is_hex as u8;
 
     while i + 8 <= bytes.len() {
         let chunk = unsafe {
@@ -394,32 +397,32 @@ pub fn take_hex(s: &str) -> (&str, &str) {
                 let b6 = ((chunk >> 48) & 0xFF) as usize;
                 let b7 = ((chunk >> 56) & 0xFF) as usize;
 
-                if (DIGIT_TABLE[b0] & 2) != 0 &&
-                   (DIGIT_TABLE[b1] & 2) != 0 &&
-                   (DIGIT_TABLE[b2] & 2) != 0 &&
-                   (DIGIT_TABLE[b3] & 2) != 0 &&
-                   (DIGIT_TABLE[b4] & 2) != 0 &&
-                   (DIGIT_TABLE[b5] & 2) != 0 &&
-                   (DIGIT_TABLE[b6] & 2) != 0 &&
-                   (DIGIT_TABLE[b7] & 2) != 0 {
+                if (DIGIT_TABLE[b0] & HEX_MASK) != 0 &&
+                   (DIGIT_TABLE[b1] & HEX_MASK) != 0 &&
+                   (DIGIT_TABLE[b2] & HEX_MASK) != 0 &&
+                   (DIGIT_TABLE[b3] & HEX_MASK) != 0 &&
+                   (DIGIT_TABLE[b4] & HEX_MASK) != 0 &&
+                   (DIGIT_TABLE[b5] & HEX_MASK) != 0 &&
+                   (DIGIT_TABLE[b6] & HEX_MASK) != 0 &&
+                   (DIGIT_TABLE[b7] & HEX_MASK) != 0 {
                     i += 8;
                 } else {
                     // find exactly where it stopped
-                    if (DIGIT_TABLE[b0] & 2) == 0 { break }
+                    if (DIGIT_TABLE[b0] & HEX_MASK) == 0 { break }
                     i += 1;
-                    if (DIGIT_TABLE[b1] & 2) == 0 { break }
+                    if (DIGIT_TABLE[b1] & HEX_MASK) == 0 { break }
                     i += 1;
-                    if (DIGIT_TABLE[b2] & 2) == 0 { break }
+                    if (DIGIT_TABLE[b2] & HEX_MASK) == 0 { break }
                     i += 1;
-                    if (DIGIT_TABLE[b3] & 2) == 0 { break }
+                    if (DIGIT_TABLE[b3] & HEX_MASK) == 0 { break }
                     i += 1;
-                    if (DIGIT_TABLE[b4] & 2) == 0 { break }
+                    if (DIGIT_TABLE[b4] & HEX_MASK) == 0 { break }
                     i += 1;
-                    if (DIGIT_TABLE[b5] & 2) == 0 { break }
+                    if (DIGIT_TABLE[b5] & HEX_MASK) == 0 { break }
                     i += 1;
-                    if (DIGIT_TABLE[b6] & 2) == 0 { break }
+                    if (DIGIT_TABLE[b6] & HEX_MASK) == 0 { break }
                     i += 1;
-                    if (DIGIT_TABLE[b7] & 2) == 0 { break }
+                    if (DIGIT_TABLE[b7] & HEX_MASK) == 0 { break }
                     i += 1;
                     break
                 }
