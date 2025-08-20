@@ -196,8 +196,8 @@ pub fn take_number(s: &str) -> (&str, &str) {
 
                     // extract mask (aarch64 doesn't have _mm_movemask_epi8)
                     let mut mask = 0u32;
-                    for i in 0..8 {
-                        mask |= ((arr[i] >> 7) as u32) << i;
+                    for (i, v) in arr.into_iter().enumerate() {
+                        mask |= ((v >> 7) as u32) << i;
                     } mask
                 };
 
@@ -364,8 +364,8 @@ pub fn take_ident(s: &str) -> (&str, &str) {
 
                     // extract mask (aarch64 doesn't have _mm_movemask_epi8)
                     let mut mask = 0u32;
-                    for i in 0..8 {
-                        mask |= ((arr[i] >> 7) as u32) << i;
+                    for (i, v) in arr.into_iter().enumerate() {
+                        mask |= ((v >> 7) as u32) << i;
                     } mask
                 };
 
@@ -525,8 +525,8 @@ pub fn take_hex(s: &str) -> (&str, &str) {
 
                     // extract mask (aarch64 doesn't have _mm_movemask_epi8)
                     let mut mask = 0u32;
-                    for i in 0..8 {
-                        mask |= ((arr[i] >> 7) as u32) << i;
+                    for (i, v) in arr.into_iter().enumerate() {
+                        mask |= ((v >> 7) as u32) << i;
                     } mask
                 };
 

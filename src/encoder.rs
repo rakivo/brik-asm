@@ -791,6 +791,7 @@ impl<'a> Encoder<'a> {
 
         // Case 1: starts with a digit or minus → parse number
         if let Some(first) = s.chars().next() {
+            #[allow(clippy::collapsible_if)]
             if first.is_ascii_digit() || first == '-' {
                 let (num, rest) = take_number(s);
                 let num = parse_i(num)?;
