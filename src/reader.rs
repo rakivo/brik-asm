@@ -29,7 +29,7 @@ pub fn with_file<R>(
 
         file.read_exact(&mut buf)?;
 
-        #[cfg(feature = "madvise")]
+        #[cfg(all(feature = "madvise", unix))]
         unsafe {
             _ = libc::madvise(
                 buf.as_ptr() as *mut libc::c_void,
@@ -45,7 +45,7 @@ pub fn with_file<R>(
 
         let mmap = unsafe { opts.map(&file)? };
 
-        #[cfg(feature = "madvise")]
+        #[cfg(all(feature = "madvise", unix))]
         unsafe {
             _ = libc::madvise(
                 mmap.as_ptr() as *mut libc::c_void,
