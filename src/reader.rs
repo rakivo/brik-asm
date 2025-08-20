@@ -22,7 +22,11 @@ pub fn with_file<R>(
 
     let ret = if file_size < MMAP_THRESHOLD {
         let mut buf = Vec::with_capacity(file_size);
-        file.read_to_end(&mut buf)?;
+
+        // to not initialize buf with zeroes
+        unsafe { buf.set_len(file_size); }
+
+        file.read_exact(&mut buf)?;
 
         #[cfg(feature = "madvise")]
         unsafe {
