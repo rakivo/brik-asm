@@ -1,4 +1,3 @@
-// TODO(#4): implement SIMD chunk-validation for ARM CPUs
 
 use std::{str, fmt, ptr, error};
 
