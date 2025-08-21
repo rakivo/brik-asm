@@ -177,7 +177,7 @@ impl InputSource {
             Self::MacroExpansion { content, pos, line_number, .. } => {
                 if *pos >= content.len() { return; }
 
-                if let Some(nl_pos) = memchr::memchr(b'\n', &content[*pos..].as_bytes()) {
+                if let Some(nl_pos) = memchr::memchr(b'\n', content[*pos..].as_bytes()) {
                     *pos += nl_pos + 1;
                 } else {
                     *pos = content.len();
@@ -218,9 +218,7 @@ impl<'a> Assembler<'a> {
     #[inline]
     fn get_next_line(&mut self) -> Option<InputLine> {
         loop {
-            let Some(last) = self.input_stack.last_mut() else {
-                return None
-            };
+            let last = self.input_stack.last_mut()?;
 
             let (line, should_advance) = last
                 .peek_line()
@@ -255,7 +253,7 @@ impl<'a> Assembler<'a> {
             self.line_number = line_number;
 
             let line = line.as_str();
-            let line = line.strip_suffix('\n').unwrap_or(&line);
+            let line = line.strip_suffix('\n').unwrap_or(line);
             let line = &line[skip_whitespace(line)..];
 
             if line.is_empty() {
