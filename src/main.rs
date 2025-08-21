@@ -1,4 +1,5 @@
 // TODO(#7): Macros
+// TODO(#11): Conditional compilation
 // TODO(#9): Local labels
 // TODO(#8): .size directive
 // TODO(#10): Report undefined symbols
