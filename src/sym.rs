@@ -14,7 +14,6 @@ impl SymId_ {
     pub const fn from_brik(sid: SymbolId) -> Self { unsafe { mem::transmute(sid) } }
 }
 
-#[repr(align(64))]
 #[derive(Copy, Clone)]
 struct SymEntry {
     key_lo: u64,    // first 8 bytes (LE) ...........64
@@ -23,7 +22,6 @@ struct SymEntry {
     len1:   u32,    // length + 1 (0 == sentinel) ...32
     dist:   u32,    // probe distance (Robin Hood) ..32
     off:    u32,    // offset into arena (bytes) ....32
-    __pad:  u32,    // ..............................32
     id:     SymId_, // brik SymbolId ................64
 }
 
@@ -101,7 +99,6 @@ impl SymInterner {
             len1,
             dist,
             off,
-            __pad: 0,
             id: SymId_::from_brik(id),
         };
 
