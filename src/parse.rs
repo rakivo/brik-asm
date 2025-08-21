@@ -719,7 +719,7 @@ pub fn parse_aqrl(operands: &str) -> anyhow::Result<AqRl> {
 }
 
 #[inline]
-pub fn with_cs_list<T>(input: &str, mut f: impl FnMut(T)) -> anyhow::Result<()>
+pub fn parsing_list<T>(input: &str, sepa: u8, mut f: impl FnMut(T)) -> anyhow::Result<()>
 where
     T: Num + str::FromStr,
     <T as Num>::FromStrRadixErr: fmt::Display,
@@ -729,7 +729,7 @@ where
 
     let mut byte_offset = 0;
     while byte_offset < bytes.len() {
-        let end = memchr(b',', &bytes[byte_offset..])
+        let end = memchr(sepa, &bytes[byte_offset..])
             .map(|pos| byte_offset + pos)
             .unwrap_or(bytes.len());
 
@@ -803,6 +803,34 @@ pub fn parse_reg(s: &str) -> anyhow::Result<(Reg, &str)> {
     ensure_comma_or_end(rest)?;
 
     Ok((Reg::from_u32(reg_num), trim_next(rest)))
+}
+
+/// Return (first_token_opt, rest_opt) where both are Option<&str>
+/// - first_token_opt = Some(&str) when the line has at least one non-whitespace token
+/// - rest_opt = Some(&str) if there's trailing text after the token (leading whitespace trimmed)
+#[inline]
+pub fn first_token_and_rest(s: &str) -> (Option<&str>, Option<&str>) {
+    let bytes = s.as_bytes();
+    // find first non-whitespace
+    let mut i = 0usize;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return (None, None);
+    }
+    let start = i;
+    // find first whitespace after token
+    while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let first = &s[start..i];
+    // skip whitespace to get to rest
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let rest = if i < bytes.len() { Some(&s[i..]) } else { None };
+    (Some(first), rest)
 }
 
 #[cfg(test)]
