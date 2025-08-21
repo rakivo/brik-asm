@@ -1,6 +1,7 @@
 // TODO(#7): Macros
 // TODO(#9): Local labels
 // TODO(#8): .size directive
+// TODO(#10): Report undefined symbols
 // TODO(#2): Properly manage symbol sizes
 // TODO(#6): Factor out assembler API into a lib.rs file
 
