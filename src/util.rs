@@ -1,14 +1,3 @@
-macro_rules! bail_at {
-    ($path:expr, $line:expr, $($err: tt)*) => {
-        anyhow::bail!{
-            "{f}:{l}: {e}",
-            f = $path,
-            l = $line,
-            e = std::format_args!($($err)*)
-        }
-    };
-}
-
 macro_rules! maybe_reloc {
     // rd + imm
     ($self:ident, $ctor:ident, rd=$rd:expr, imm=$imm:expr, kind=$kind:expr) => {{
