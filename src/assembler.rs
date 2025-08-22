@@ -1,4 +1,5 @@
 use crate::encoder::Encoder;
+use crate::fm::{BrikFile, FileManager};
 use crate::mnemonic::Mnemonic;
 use crate::parse::{
     parse_i,
@@ -9,7 +10,6 @@ use crate::parse::{
 };
 
 use std::rc::Rc;
-use std::path::Path;
 use std::borrow::Cow;
 use std::ptr::NonNull;
 use std::{str, slice};
@@ -42,7 +42,6 @@ struct MacroDef {
     params: Rc<[Box<str>]>,
     body: Rc<str>,
     defined_at_line: u32,
-    __pad: u32
 }
 
 struct InputLine {
@@ -158,30 +157,32 @@ impl InputSource {
 
     #[inline]
     fn advance(&mut self) {
+        #[inline(always)]
+        fn maybe_advance(pos: &mut usize, ln: &mut u32, content: &[u8]) {
+            if let Some(nl_pos) = memchr::memchr(b'\n', &content[*pos..]) {
+                *pos += nl_pos + 1;
+            } else {
+                *pos = content.len();
+            }
+
+            *ln += 1;
+        }
+
         match self {
             Self::File { content, len, pos, line_number } => {
-                if *pos >= *len { return; }
+                if *pos >= *len { return }
 
-                unsafe {
-                    let slice = slice::from_raw_parts(content.as_ptr(), *len);
-                    if let Some(nl_pos) = memchr::memchr(b'\n', &slice[*pos..]) {
-                        *pos += nl_pos + 1;
-                    } else {
-                        *pos = *len;
-                    }
-                    *line_number += 1;
-                }
+                let slice = unsafe {
+                    slice::from_raw_parts(content.as_ptr(), *len)
+                };
+
+                maybe_advance(pos, line_number, slice);
             }
 
             Self::MacroExpansion { content, pos, line_number, .. } => {
-                if *pos >= content.len() { return; }
+                if *pos >= content.len() { return }
 
-                if let Some(nl_pos) = memchr::memchr(b'\n', content[*pos..].as_bytes()) {
-                    *pos += nl_pos + 1;
-                } else {
-                    *pos = content.len();
-                }
-                *line_number += 1;
+                maybe_advance(pos, line_number, content.as_bytes());
             }
         }
     }
@@ -192,6 +193,8 @@ pub struct Assembler<'a> {
     sections: Sections,
 
     line_number: u32,
+
+    file_manager: FileManager,
 
     macros: HashMap<String, MacroDef, wyhash::WyHasherBuilder>,
     input_stack: Vec<InputSource>,
@@ -208,6 +211,7 @@ impl<'a> Assembler<'a> {
                 bss    : enc.add_bss_section(),
             },
             enc,
+            file_manager: FileManager::default(),
             line_number: u32::default(),
             macros: HashMap::default(),
             input_stack: Vec::default(),
@@ -229,23 +233,31 @@ impl<'a> Assembler<'a> {
                 continue
             }
 
-            // now advance the source
             last.advance();
 
             return Some(line)
         }
     }
 
-    pub fn assemble_file(
-        mut self,
-        path: &Path,
-        src: &str
-    ) -> anyhow::Result<Object<'a>> {
+    #[inline]
+    fn append_input_file(&mut self, file_path: &str) -> anyhow::Result<()> {
+        let bytes = BrikFile::new(file_path)
+            .and_then(|file| self.file_manager.read_file(file))
+            .with_context(|| format!("reading input file: {file_path}"))?;
+
+        let str = unsafe {
+            str::from_utf8_unchecked(bytes)
+        };
+
+        self.input_stack.push(InputSource::file_from_str(str));
+
+        Ok(())
+    }
+
+    pub fn assemble_file(mut self, file_path: &str) -> anyhow::Result<Object<'a>> {
         self.enc.position_at_end(self.sections.text);
 
-        self.input_stack.push(InputSource::file_from_str(src));
-
-        let path_display = path.display().to_string();
+        self.append_input_file(file_path)?;
 
         while let Some(line) = self.get_next_line() {
             let line_number = line.src_line_number;
@@ -297,9 +309,7 @@ impl<'a> Assembler<'a> {
                 continue
             }
 
-            let fl_context = || format!{
-                "{path_display}:{line_number}:",
-            };
+            let fl_context = || format!("{file_path}:{line_number}:");
 
             if first_byte == b'.' {
                 self.handle_directive(line)
@@ -339,8 +349,7 @@ impl<'a> Assembler<'a> {
             .finish()
             .map_err(|e| anyhow::anyhow!(e.rendered))
             .with_context(|| format!{
-                "generating object file for {path}",
-                path = path.display()
+                "generating object file for {file_path}",
             })
     }
 
@@ -363,7 +372,7 @@ impl<'a> Assembler<'a> {
             ""
         };
 
-        let get_name = || {
+        let next = || {
             if rest.is_empty() {
                 bail!("expected section name")
             }
@@ -378,7 +387,7 @@ impl<'a> Assembler<'a> {
             b"bss"    => self.enc.position_at_end(self.sections.bss),
 
             b"section" => {
-                let name = get_name()?;
+                let name = next()?;
                 match name.as_bytes() {
                     b"text"   => self.enc.position_at_end(self.sections.text),
                     b"data"   => self.enc.position_at_end(self.sections.data),
@@ -393,7 +402,7 @@ impl<'a> Assembler<'a> {
             }
 
             b"extern" | b"extrn" => {
-                let name = get_name()?;
+                let name = next()?;
                 let (_, sym_id) = self.enc.edit_or_add_sym_and_edit_it(name, |s| {
                     s.section = SymbolSection::Undefined;
                     s.scope   = SymbolScope::Dynamic;
@@ -403,7 +412,7 @@ impl<'a> Assembler<'a> {
             }
 
             b"global" | b"globl" => {
-                let name = get_name()?;
+                let name = next()?;
                 let lbl_id = self.enc.get_or_declare_label(
                     name,
                     SymbolKind::Text,
@@ -463,6 +472,18 @@ impl<'a> Assembler<'a> {
                 self.enc.align_to(8);
                 parsing_list(rest, b' ', |v| _ = self.enc.emit_dword(v))?;
                 self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
+            }
+
+            b"include" => {
+                let rest = next()?;
+                let (file_path, _) = take_string(rest);
+                let file_path = &file_path[1..file_path.len()-1];
+
+                if file_path.is_empty() {
+                    bail!("empty include file path")
+                }
+
+                self.append_input_file(file_path)?;
             }
 
             _ => {
@@ -525,7 +546,6 @@ impl<'a> Assembler<'a> {
                 params,
                 body: body.into(),
                 defined_at_line: self.line_number,
-                __pad: 0
             }
         );
 

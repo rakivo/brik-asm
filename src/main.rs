@@ -28,9 +28,9 @@ use anyhow::{Context, Result};
 #[macro_use]
 mod util;
 
+mod fm;
 mod sym;
 mod parse;
-mod reader;
 mod encoder;
 mod mnemonic;
 mod assembler;
@@ -61,9 +61,6 @@ fn main() -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| default_out(&args.input).expect("output"));
 
-    let in_display  = args.input.display();
-    let out_display = out_path.display();
-
     let mut asm = Assembler::new(
         BinaryFormat::Elf,
         Arch::Riscv64,
@@ -79,14 +76,13 @@ fn main() -> anyhow::Result<()> {
 
     let asm = assembler::Assembler::new(Encoder::new(asm));
 
-    let obj = reader::with_file(&args.input, |src| {
-        let src = unsafe {
-            str::from_utf8_unchecked(src)
-        };
+    let obj = asm.assemble_file(&args.input.to_string_lossy())
+        .with_context(|| format!{
+            "assembling {f}",
+            f = &args.input.display()
+        })?;
 
-        asm.assemble_file(&args.input, src)
-            .with_context(|| format!("assembling {in_display}"))
-    })??;
+    let out_display = out_path.display();
 
     let handle = fs::File::create(&out_path)?;
     let mut buffered = io::BufWriter::new(handle);
