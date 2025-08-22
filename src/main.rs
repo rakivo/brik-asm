@@ -1,6 +1,5 @@
 // TODO(#11): Conditional compilation
 // TODO(#14): Constants
-// TODO(#13): Directive to include files
 // TODO(#9): Local labels
 // TODO(#8): .size directive
 // TODO(#10): Report undefined symbols
