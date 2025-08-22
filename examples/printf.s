@@ -1,20 +1,15 @@
+.include "std"
+
 .text
 .extern printf
 .global main
 main:
-    addi  sp,   sp,  -16
-    sd    ra,   sp,    8
-    sd    s0,   sp,    0
-    addi  s0,   sp,   16
+    prologue
 
-    la    a0,   msg
-    call  printf
+    printf msg
 
-    ld    ra,   sp,    8
-    ld    s0,   sp,    0
-    addi  sp,   sp,   16
-
-    jalr  zero, ra,    0
+    epilogue
+    reti 0
 
 .rodata
 msg:

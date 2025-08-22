@@ -1,3 +1,5 @@
+.include "std"
+
 .text
 .global _start
 _start:
@@ -26,7 +28,4 @@ _start:
     srl   s5, a0,   a1      ; s5 = 42 >> (8 & 31) = 0
     sra   s6, a0,   a1      ; s6 = 42 >>> (8 & 31) = 0
 
-    ; Exit
-    addi  a0, zero, 0       ; Exit code 0
-    addi  a7, zero, 93      ; sys_exit
-    ecall
+    sys_exit 0

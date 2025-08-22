@@ -1,54 +1,4 @@
-macro mov $dst $src {
-    addi $dst, $src, 0
-}
-
-macro nop {
-    addi zero, zero, 0
-}
-
-macro not $rd $rs {
-    xori $rd, $rs, -1
-}
-
-macro neg $rd $rs {
-    sub $rd, zero, $rs
-}
-
-macro j $label {
-    jal zero, $label
-}
-
-macro jr $rs {
-    jalr zero, $rs, 0
-}
-
-macro ret {
-    jalr zero, ra, 0
-}
-
-macro reti $imm {
-    li a0, $imm
-    ret
-}
-
-macro prologue {
-    addi  sp, sp, -16
-    sd    ra, sp, 8
-    sd    s0, sp, 0
-    addi  s0, sp, 16
-}
-
-macro epilogue {
-    ld    ra, sp, 8
-    ld    s0, sp, 0
-    addi  sp, sp, 16
-}
-
-macro printf1 $fmt $reg {
-    mov a0, $fmt
-    mov a1, $reg
-    call printf
-}
+.include "std"
 
 .text
 .extern printf
@@ -79,6 +29,7 @@ main:
 skip:
     la      t4, fmt_skip
     printf1 t4, t0
+    epilogue
     reti 0
 
 done:

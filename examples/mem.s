@@ -1,3 +1,5 @@
+.include "std"
+
 .text
 .global _start
 _start:
@@ -14,9 +16,9 @@ _start:
 
     ; Test stores
     addi  t1, t0, 64        ; Point to writable area
-    addi  t2, zero, 0x12
+    li    t2, 0x12
     sb    t2, t1, 0         ; Store byte
-    addi  t2, zero, 0x3456
+    li    t2, 0x3456
     sh    t2, t1, 2         ; Store halfword
     lui   t2, 0x789ab
     sw    t2, t1, 4         ; Store word
@@ -32,10 +34,7 @@ _start:
     srliw s4, a0, 2         ; 32-bit right shift immediate
     sraiw s5, a0, 2         ; 32-bit arithmetic right shift immediate
 
-    ; Exit
-    addi  a0, zero, 0
-    addi  a7, zero, 93
-    ecall
+    sys_exit  0
 
 .data
 data_section:

@@ -1,6 +1,7 @@
 // TODO(#11): Conditional compilation
 // TODO(#14): Constants
 // TODO(#9): Local labels
+// TODO(#15): .string directive
 // TODO(#8): .size directive
 // TODO(#10): Report undefined symbols
 // TODO(#2): Properly manage symbol sizes
