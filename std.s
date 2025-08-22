@@ -44,25 +44,27 @@ macro epilogue {
     addi  sp, sp, 16
 }
 
-macro printf $fmt {
+; ---- printf helpers that take $fmt as a register ----
+
+macro printfr $fmt {
     mov a0, $fmt
     call printf
 }
 
-macro printf1 $fmt $reg {
+macro printf1r $fmt $reg {
     mov a0, $fmt
     mov a1, $reg
     call printf
 }
 
-macro printf2 $fmt, $arg1, $arg2 {
+macro printf2r $fmt, $arg1, $arg2 {
     mov a0, $fmt
     mov a1, $arg1
     mov a2, $arg2
     call printf
 }
 
-macro printf3 $fmt, $arg1, $arg2, $arg3 {
+macro printf3r $fmt, $arg1, $arg2, $arg3 {
     mov a0, $fmt
     mov a1, $arg1
     mov a2, $arg2
@@ -70,7 +72,7 @@ macro printf3 $fmt, $arg1, $arg2, $arg3 {
     call printf
 }
 
-macro printf4 $fmt, $arg1, $arg2, $arg3, $arg4 {
+macro printf4r $fmt, $arg1, $arg2, $arg3, $arg4 {
     mov a0, $fmt
     mov a1, $arg1
     mov a2, $arg2
@@ -79,7 +81,7 @@ macro printf4 $fmt, $arg1, $arg2, $arg3, $arg4 {
     call printf
 }
 
-macro printf5 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5 {
+macro printf5r $fmt, $arg1, $arg2, $arg3, $arg4, $arg5 {
     mov a0, $fmt
     mov a1, $arg1
     mov a2, $arg2
@@ -89,7 +91,7 @@ macro printf5 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5 {
     call printf
 }
 
-macro printf6 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6 {
+macro printf6r $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6 {
     mov a0, $fmt
     mov a1, $arg1
     mov a2, $arg2
@@ -100,7 +102,7 @@ macro printf6 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6 {
     call printf
 }
 
-macro printf7 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6, $arg7 {
+macro printf7r $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6, $arg7 {
     mov a0, $fmt
     mov a1, $arg1
     mov a2, $arg2
@@ -110,6 +112,48 @@ macro printf7 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6, $arg7 {
     mov a6, $arg6
     mov a7, $arg7
     call printf
+}
+
+; ---- printf helpers that take $fmt as a symbol ----
+
+macro printf $fmt {
+    la a0, $fmt
+    printfr a0
+}
+
+macro printf1 $fmt $arg1 {
+    la a0, $fmt
+    printf1r a0, $arg1
+}
+
+macro printf2 $fmt, $arg1, $arg2 {
+    la a0, $fmt
+    printf2r a0, $arg1, $arg2
+}
+
+macro printf3 $fmt, $arg1, $arg2, $arg3 {
+    la a0, $fmt
+    printf3r a0, $arg1, $arg2, $arg3
+}
+
+macro printf4 $fmt, $arg1, $arg2, $arg3, $arg4 {
+    la a0, $fmt
+    printf4r a0, $arg1, $arg2, $arg3, $arg4
+}
+
+macro printf5 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5 {
+    la a0, $fmt
+    printf5r a0, $arg1, $arg2, $arg3, $arg4, $arg5
+}
+
+macro printf6 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6 {
+    la a0, $fmt
+    printf6r a0, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6
+}
+
+macro printf7 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6, $arg7 {
+    la a0, $fmt
+    printf7r a0, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6, $arg7
 }
 
 ; ---- common syscall wrappers ----
