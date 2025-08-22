@@ -32,121 +32,13 @@ const MACRO_RECURSION_LIMIT: usize = 64;
 
 const STANDARD_LIBRARY_FILE_PATH: &str = "std";
 
-const STANDARD_LIBRARY: &str = r#"
-macro mov $dst $src {
-    addi $dst, $src, 0
-}
-
-macro nop {
-    addi zero, zero, 0
-}
-
-macro not $rd $rs {
-    xori $rd, $rs, -1
-}
-
-macro neg $rd $rs {
-    sub $rd, zero, $rs
-}
-
-macro j $label {
-    jal zero, $label
-}
-
-macro jr $rs {
-    jalr zero, $rs, 0
-}
-
-macro ret {
-    jalr zero, ra, 0
-}
-
-macro reti $imm {
-    li a0, $imm
-    ret
-}
-
-macro prologue {
-    addi  sp, sp, -16
-    sd    ra, sp, 8
-    sd    s0, sp, 0
-    addi  s0, sp, 16
-}
-
-macro epilogue {
-    ld    ra, sp, 8
-    ld    s0, sp, 0
-    addi  sp, sp, 16
-}
-
-macro printf1 $fmt $reg {
-    mov a0, $fmt
-    mov a1, $reg
-    call printf
-}
-
-macro printf2 $fmt, $arg1, $arg2 {
-    mov a0, $fmt
-    mov a1, $arg1
-    mov a2, $arg2
-    call printf
-}
-
-macro printf3 $fmt, $arg1, $arg2, $arg3 {
-    mov a0, $fmt
-    mov a1, $arg1
-    mov a2, $arg2
-    mov a3, $arg3
-    call printf
-}
-
-macro printf4 $fmt, $arg1, $arg2, $arg3, $arg4 {
-    mov a0, $fmt
-    mov a1, $arg1
-    mov a2, $arg2
-    mov a3, $arg3
-    mov a4, $arg4
-    call printf
-}
-
-macro printf5 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5 {
-    mov a0, $fmt
-    mov a1, $arg1
-    mov a2, $arg2
-    mov a3, $arg3
-    mov a4, $arg4
-    mov a5, $arg5
-    call printf
-}
-
-macro printf6 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6 {
-    mov a0, $fmt
-    mov a1, $arg1
-    mov a2, $arg2
-    mov a3, $arg3
-    mov a4, $arg4
-    mov a5, $arg5
-    mov a6, $arg6
-    call printf
-}
-
-macro printf7 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6, $arg7 {
-    mov a0, $fmt
-    mov a1, $arg1
-    mov a2, $arg2
-    mov a3, $arg3
-    mov a4, $arg4
-    mov a5, $arg5
-    mov a6, $arg6
-    mov a7, $arg7
-    call printf
-}"#;
+const STANDARD_LIBRARY: &str = include_str!("../std.s");
 
 pub struct Sections {
-    pub text   : SectionId,
-    pub data   : SectionId,
-    pub rodata : SectionId,
-    pub bss    : SectionId,
+    text   : SectionId,
+    data   : SectionId,
+    rodata : SectionId,
+    bss    : SectionId,
 }
 
 struct MacroDef {
