@@ -5,7 +5,6 @@ use crate::parse::{
     take_string,
     parsing_list,
     split_at_space,
-    skip_whitespace,
     first_token_and_rest
 };
 
