@@ -44,6 +44,11 @@ macro epilogue {
     addi  sp, sp, 16
 }
 
+macro printf $fmt {
+    mov a0, $fmt
+    call printf
+}
+
 macro printf1 $fmt $reg {
     mov a0, $fmt
     mov a1, $reg
