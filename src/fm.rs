@@ -77,6 +77,7 @@ impl BrikFile {
 
         let file_size = self.meta.len();
 
+        #[cfg_attr(all(feature = "madvise", unix), allow(unused))]
         let (ptr, len) = if file_size < MMAP_THRESHOLD {
             let bytes = self.read_file_to_vec()?;
             (bytes.as_ptr(), bytes.len())
