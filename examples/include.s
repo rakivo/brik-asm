@@ -9,26 +9,22 @@ main:
 
     ; t0 = 69
     li      t0, 69
-    la      t1, fmt1
-    printf1 t1, t0        ; prints: "t0 = 69"
+    printf1 fmt1, t0      ; prints: "t0 = 69"
 
     ; t1 = -t0
     li      t0, 69
     neg     t1, t0
-    la      t2, fmt2
-    printf1 t2, t1        ; prints: "neg(t0) = -69"
+    printf1 fmt2, t1      ; prints: "neg(t0) = -69"
 
     ; t2 = ~t0
     li      t0, 69
     not     t2, t0
-    la      t3, fmt3
-    printf1 t3, t2        ; prints: "not(t0) = -70"
+    printf1 fmt3, t2      ; prints: "not(t0) = -70"
 
     j done
 
 skip:
-    la      t4, fmt_skip
-    printf1 t4, t0
+    printf1 fmt_skip, t0
     epilogue
     reti 0
 
