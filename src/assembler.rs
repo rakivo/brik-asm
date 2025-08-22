@@ -254,18 +254,16 @@ impl<'a> Assembler<'a> {
 
             let line = line.as_str();
             let line = line.strip_suffix('\n').unwrap_or(line);
-            let line = &line[skip_whitespace(line)..];
+            let line = line.trim_start();
 
-            if line.is_empty() {
-                continue;
-            }
+            if line.is_empty() { continue }
 
             let line_bytes = line.as_bytes();
             let first_byte = *unsafe { line_bytes.get_unchecked(0) };
 
             if first_byte == b';' { continue }
 
-            let line = match line.rfind(';') {
+            let line = match line.find(';') {
                 Some(pos) => line[..pos].trim_end(),
                 None => line
             };
@@ -483,7 +481,7 @@ impl<'a> Assembler<'a> {
         // "macro name [..param] {"
         let header = line
             .strip_prefix("macro ")
-            .and_then(|s| s.strip_suffix(" {"))
+            .and_then(|s| s.strip_suffix("{"))
             .ok_or_else(|| anyhow::anyhow!("invalid macro header"))?;
 
         let mut parts = header.split_whitespace();
