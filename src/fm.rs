@@ -18,7 +18,7 @@ impl BrikFileContents {
     #[inline(always)]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
-            Self::Buf(vec) => &vec,
+            Self::Buf(vec) => vec,
             Self::Mmap(mmap) => &mmap[..]
         }
     }
