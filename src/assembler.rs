@@ -1,6 +1,6 @@
 use crate::encoder::Encoder;
-use crate::fm::{BrikFile, FileManager};
 use crate::mnemonic::Mnemonic;
+use crate::fm::{BrikFile, FileManager};
 use crate::parse::{
     parse_i,
     take_string,
@@ -30,7 +30,118 @@ use anyhow::{bail, Context};
 
 const MACRO_RECURSION_LIMIT: usize = 64;
 
-#[derive(Copy, Clone)]
+const STANDARD_LIBRARY_FILE_PATH: &str = "std";
+
+const STANDARD_LIBRARY: &str = r#"
+macro mov $dst $src {
+    addi $dst, $src, 0
+}
+
+macro nop {
+    addi zero, zero, 0
+}
+
+macro not $rd $rs {
+    xori $rd, $rs, -1
+}
+
+macro neg $rd $rs {
+    sub $rd, zero, $rs
+}
+
+macro j $label {
+    jal zero, $label
+}
+
+macro jr $rs {
+    jalr zero, $rs, 0
+}
+
+macro ret {
+    jalr zero, ra, 0
+}
+
+macro reti $imm {
+    li a0, $imm
+    ret
+}
+
+macro prologue {
+    addi  sp, sp, -16
+    sd    ra, sp, 8
+    sd    s0, sp, 0
+    addi  s0, sp, 16
+}
+
+macro epilogue {
+    ld    ra, sp, 8
+    ld    s0, sp, 0
+    addi  sp, sp, 16
+}
+
+macro printf1 $fmt $reg {
+    mov a0, $fmt
+    mov a1, $reg
+    call printf
+}
+
+macro printf2 $fmt, $arg1, $arg2 {
+    mov a0, $fmt
+    mov a1, $arg1
+    mov a2, $arg2
+    call printf
+}
+
+macro printf3 $fmt, $arg1, $arg2, $arg3 {
+    mov a0, $fmt
+    mov a1, $arg1
+    mov a2, $arg2
+    mov a3, $arg3
+    call printf
+}
+
+macro printf4 $fmt, $arg1, $arg2, $arg3, $arg4 {
+    mov a0, $fmt
+    mov a1, $arg1
+    mov a2, $arg2
+    mov a3, $arg3
+    mov a4, $arg4
+    call printf
+}
+
+macro printf5 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5 {
+    mov a0, $fmt
+    mov a1, $arg1
+    mov a2, $arg2
+    mov a3, $arg3
+    mov a4, $arg4
+    mov a5, $arg5
+    call printf
+}
+
+macro printf6 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6 {
+    mov a0, $fmt
+    mov a1, $arg1
+    mov a2, $arg2
+    mov a3, $arg3
+    mov a4, $arg4
+    mov a5, $arg5
+    mov a6, $arg6
+    call printf
+}
+
+macro printf7 $fmt, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6, $arg7 {
+    mov a0, $fmt
+    mov a1, $arg1
+    mov a2, $arg2
+    mov a3, $arg3
+    mov a4, $arg4
+    mov a5, $arg5
+    mov a6, $arg6
+    mov a7, $arg7
+    call printf
+}"#;
+
 pub struct Sections {
     pub text   : SectionId,
     pub data   : SectionId,
@@ -76,6 +187,11 @@ enum InputSource {
         pos: usize,
         line_number: u32
     },
+    Virtual {
+        content: Box<str>,
+        pos: usize,
+        line_number: u32,
+    },
     MacroExpansion {
         content: Box<str>,
         pos: usize,
@@ -86,6 +202,15 @@ enum InputSource {
 
 impl InputSource {
     #[inline(always)]
+    fn virtual_from_str(s: &str) -> Self {
+        Self::Virtual {
+            content: s.to_owned().into_boxed_str(),
+            pos: 0,
+            line_number: 1
+        }
+    }
+
+    #[inline(always)]
     const fn file_from_str(s: &str) -> Self {
         Self::File {
             content: unsafe {
@@ -95,6 +220,17 @@ impl InputSource {
             len: s.len(),
             pos: 0,
             line_number: 1
+        }
+    }
+
+    #[inline(always)]
+    const fn original_line_number(&self) -> u32 {
+        match self {
+            Self::File { line_number, .. } |
+            Self::Virtual { line_number, .. } |
+            Self::MacroExpansion { original_line: line_number, .. } => {
+                *line_number
+            }
         }
     }
 
@@ -131,10 +267,13 @@ impl InputSource {
                 Some((line, true))
             }
 
-            Self::MacroExpansion { content, pos, original_line, .. } => {
+            Self::Virtual { content, pos, .. } |
+            Self::MacroExpansion { content, pos, .. } => {
+                let original_line = self.original_line_number();
+
                 if *pos >= content.len() {
                     return Some(
-                        (InputLine::empty(*original_line), false)
+                        (InputLine::empty(original_line), false)
                     )
                 }
 
@@ -147,7 +286,7 @@ impl InputSource {
                 let line = InputLine {
                     content: NonNull::new(line.as_ptr() as _).unwrap(),
                     len: line.len() as _,
-                    src_line_number: *original_line
+                    src_line_number: original_line
                 };
 
                 Some((line, true))
@@ -179,6 +318,7 @@ impl InputSource {
                 maybe_advance(pos, line_number, slice);
             }
 
+            Self::Virtual { content, pos, line_number } |
             Self::MacroExpansion { content, pos, line_number, .. } => {
                 if *pos >= content.len() { return }
 
@@ -237,6 +377,11 @@ impl<'a> Assembler<'a> {
 
             return Some(line)
         }
+    }
+
+    #[inline(always)]
+    fn append_virtual(&mut self, virt: &str) {
+        self.input_stack.push(InputSource::virtual_from_str(virt));
     }
 
     #[inline]
@@ -483,7 +628,11 @@ impl<'a> Assembler<'a> {
                     bail!("empty include file path")
                 }
 
-                self.append_input_file(file_path)?;
+                if file_path == STANDARD_LIBRARY_FILE_PATH {
+                    self.append_virtual(STANDARD_LIBRARY);
+                } else {
+                    self.append_input_file(file_path)?;
+                }
             }
 
             _ => {
