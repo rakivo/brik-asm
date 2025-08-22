@@ -4,6 +4,7 @@
 pub enum Mnemonic {
     CALL,
     ECALL,
+    LI,
     LA,
     ADDI,
     ADD,
@@ -126,8 +127,8 @@ impl Mnemonic {
     #[inline]
     pub const fn try_from_str_(s: &[u8]) -> Option<Self> {
         Some(match s {
-            // ... existing cases ...
             b"ecall" => ECALL,
+            b"li" => LI,
             b"la" => LA,
             b"addi" => ADDI,
             b"add" => ADD,

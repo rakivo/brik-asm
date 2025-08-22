@@ -130,6 +130,11 @@ impl<'a> Encoder<'a> {
                 let (imm, _rest) = self.try_parse_imm(rest)?;
                 maybe_reloc!(self, LUI, rd=rd, imm=imm, kind=RelocKind::PcrelHi20);
             }
+            LI => {
+                let (rd, rest) = parse_reg(operands)?;
+                let im = parse_i::<i64>(rest)?;
+                self.emit_li(rd, im);
+            }
             LA => {
                 let (rd, rest) = parse_reg(operands)?;
                 let (imm, _rest) = self.try_parse_imm(rest)?;
