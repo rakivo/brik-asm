@@ -1,3 +1,5 @@
+// TODO(#16): Move `anyhow::Result` out of hot loops
+//   we should probably use it only in the main function
 // TODO(#11): Conditional compilation
 // TODO(#14): Constants
 // TODO(#9): Local labels
