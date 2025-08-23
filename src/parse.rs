@@ -708,7 +708,7 @@ where
 }
 
 #[inline]
-pub fn parse_aqrl(operands: &str) -> Result<AqRl, encoder::EncoderError> {
+pub fn parse_aqrl(operands: &str) -> Result<AqRl, encoder::EncoderError<'_>> {
     let trimmed = operands.trim();
     Ok(match trimmed {
         ""     => AqRl::None,
@@ -746,7 +746,7 @@ where
     Ok(())
 }
 
-pub fn parse_reg(s: &str) -> Result<(Reg, &str), encoder::EncoderError> {
+pub fn parse_reg(s: &str) -> Result<(Reg, &str), encoder::EncoderError<'_>> {
     let s = &s[skip_whitespace(s)..];
     let bytes = s.as_bytes();
 
