@@ -8,7 +8,7 @@ clap = { version = "4.5", features = ["std", "derive"], default-features = false
 memchr = { version = "2.7", features = ["std", "use_std"], default-features = false }
 anyhow = { version = "1.0", features = ["std"], default-features = false }
 memmap2 = { version = "=0.9.7", default-features = false }
-brik = { git = "https://github.com/rakivo/brik", rev = "83f24d7" }
+brik = { git = "https://github.com/rakivo/brik", rev = "4a6639d" }
 num-traits = { version = "0.2.19", default-features = false }
 mimalloc = { version = "0.1.47", optional = true }
 cfg-if = "1.0.3"

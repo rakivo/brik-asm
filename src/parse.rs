@@ -2,9 +2,10 @@ use std::{str, fmt, ptr, error};
 
 use brik::rv32::{Reg, AqRl};
 
-use anyhow::bail;
 use num_traits::Num;
 use memchr::{memchr, memchr2};
+
+use crate::encoder;
 
 const DEC_MASK     : u8 = 1 << 0;
 const HEX_MASK     : u8 = 1 << 1;
@@ -648,14 +649,14 @@ pub fn take_string(s: &str) -> (&str, &str) {
 }
 
 #[inline]
-pub fn ensure_comma_or_end(s: &str) -> anyhow::Result<()> {
+pub fn ensure_comma_or_end(s: &str) -> Result<(), Box<str>> {
     let i = skip_whitespace(s);
     let bytes = s.as_bytes();
 
     if i >= bytes.len() || bytes[i] == b',' {
         Ok(())
     } else {
-        bail!("expected ',' or end, got: {got}", got = &s[i..])
+        Err(format!("expected ',' or end, got: {got}", got = &s[i..]).into())
     }
 }
 
@@ -675,18 +676,18 @@ pub fn trim_next(s: &str) -> &str {
 }
 
 #[inline]
-pub fn ensure_empty(s: &str) -> anyhow::Result<()> {
-    if s.trim().is_empty() { Ok(()) } else { bail!("extra tokens: {s}") }
+pub fn ensure_empty(s: &str) -> Result<(), &str> {
+    if s.trim().is_empty() { Ok(()) } else { Err("extra tokens: {s}") }
 }
 
 #[inline]
-pub fn parse_i16(s: &str) -> anyhow::Result<i16> { parse_i::<i16>(s) }
+pub fn parse_i16(s: &str) -> Result<i16, Box<str>> { parse_i::<i16>(s) }
 
 #[inline]
-pub fn parse_u8(s: &str) -> anyhow::Result<u8> { parse_i::<u8>(s) }
+pub fn parse_u8(s: &str) -> Result<u8, Box<str>> { parse_i::<u8>(s) }
 
 #[inline]
-pub fn parse_i<T>(s: &str) -> anyhow::Result<T>
+pub fn parse_i<T>(s: &str) -> Result<T, Box<str>>
 where
     T: Num,
     <T as Num>::FromStrRadixErr: fmt::Display
@@ -699,27 +700,27 @@ where
     };
     ensure_comma_or_end(rest)?;
     T::from_str_radix(tok, radix).map_err(|e| {
-        anyhow::anyhow!{
+        format!{
             "couldn't parse {tok:?} to {ty:?}: {e}",
             ty = std::any::type_name::<T>()
-        }
+        }.into()
     })
 }
 
 #[inline]
-pub fn parse_aqrl(operands: &str) -> anyhow::Result<AqRl> {
+pub fn parse_aqrl(operands: &str) -> Result<AqRl, encoder::EncoderError> {
     let trimmed = operands.trim();
     Ok(match trimmed {
         ""     => AqRl::None,
         "aq"   => AqRl::Acquire,
         "rl"   => AqRl::Release,
         "aqrl" => AqRl::AcquireRelease,
-        _ => bail!("invalid acquire/release specifier"),
+        _ => return Err(encoder::EncoderError::InvalidAqrl(trimmed))
     })
 }
 
 #[inline]
-pub fn parsing_list<T>(input: &str, sepa: u8, mut f: impl FnMut(T)) -> anyhow::Result<()>
+pub fn parsing_list<T>(input: &str, sepa: u8, mut f: impl FnMut(T)) -> Result<(), Box<str>>
 where
     T: Num + str::FromStr,
     <T as Num>::FromStrRadixErr: fmt::Display,
@@ -745,19 +746,23 @@ where
     Ok(())
 }
 
-pub fn parse_reg(s: &str) -> anyhow::Result<(Reg, &str)> {
+pub fn parse_reg(s: &str) -> Result<(Reg, &str), encoder::EncoderError> {
     let s = &s[skip_whitespace(s)..];
     let bytes = s.as_bytes();
 
     if bytes.is_empty() {
-        bail!("undefined register: {s}");
+        return Err(encoder::EncoderError::InvalidRegister(s))
     }
 
     // x?
     if bytes[0] == b'x' && bytes.len() > 1 {
         let (num_str, rest) = take_number(&s[1..]);
-        let n = num_str.parse::<u8>()?;
-        ensure_comma_or_end(rest)?;
+        let n = num_str.parse::<u8>().map_err(|_| {
+            encoder::EncoderError::InvalidRegister(s)
+        })?;
+        ensure_comma_or_end(rest).map_err(|_| {
+            encoder::EncoderError::InvalidRegister(s)
+        })?;
         return Ok((Reg::from_u32(n as _), trim_next(rest)));
     }
 
@@ -796,11 +801,13 @@ pub fn parse_reg(s: &str) -> anyhow::Result<(Reg, &str)> {
         (b'f', Some(b'p'), _) => (8, 2),   // fp (alias)
         (b'z', Some(b'e'), Some(b'r')) if bytes.len() >= 4 && &bytes[..4] == b"zero" => (0, 4),
 
-        _ => bail!("undefined register: {s}"),
+        _ => return Err(encoder::EncoderError::InvalidRegister(s))
     };
 
     let rest = &s[consumed..];
-    ensure_comma_or_end(rest)?;
+    ensure_comma_or_end(rest).map_err(|_| {
+        encoder::EncoderError::InvalidRegister(s)
+    })?;
 
     Ok((Reg::from_u32(reg_num), trim_next(rest)))
 }

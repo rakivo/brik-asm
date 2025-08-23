@@ -409,6 +409,7 @@ impl<'a> Assembler<'a> {
 
             self.enc
                 .encode_inst(m, rest)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))
                 .with_context(fl_context)?;
         }
 
@@ -494,7 +495,7 @@ impl<'a> Assembler<'a> {
             }
 
             b"space" => {
-                let count = parse_i::<u64>(rest)?;
+                let count = parse_i::<u64>(rest).map_err(|e| anyhow::anyhow!(e))?;
                 self.enc.emit_zeroes(count as _);
                 self.enc.edit_curr_label_sym(|s| {
                     s.kind = SymbolKind::Data;
@@ -522,25 +523,25 @@ impl<'a> Assembler<'a> {
 
             b"byte" => {
                 self.enc.align_to(1);
-                parsing_list(rest, b' ', |v| _ = self.enc.emit_byte(v))?;
+                parsing_list(rest, b' ', |v| _ = self.enc.emit_byte(v)).map_err(|e| anyhow::anyhow!(e))?;
                 self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
             }
 
             b"hword" => {
                 self.enc.align_to(2);
-                parsing_list(rest, b' ', |v| _ = self.enc.emit_half(v))?;
+                parsing_list(rest, b' ', |v| _ = self.enc.emit_half(v)).map_err(|e| anyhow::anyhow!(e))?;
                 self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
             }
 
             b"word" => {
                 self.enc.align_to(4);
-                parsing_list(rest, b' ', |v| _ = self.enc.emit_word(v))?;
+                parsing_list(rest, b' ', |v| _ = self.enc.emit_word(v)).map_err(|e| anyhow::anyhow!(e))?;
                 self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
             }
 
             b"dword" => {
                 self.enc.align_to(8);
-                parsing_list(rest, b' ', |v| _ = self.enc.emit_dword(v))?;
+                parsing_list(rest, b' ', |v| _ = self.enc.emit_dword(v)).map_err(|e| anyhow::anyhow!(e))?;
                 self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
             }
 

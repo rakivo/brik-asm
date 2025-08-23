@@ -13,6 +13,8 @@ use crate::parse::{
     ensure_empty,
 };
 
+use std::borrow::Cow;
+use std::error::Error;
 use std::fmt::{self, Write};
 use std::ops::{Deref, DerefMut};
 
@@ -25,7 +27,6 @@ use brik::object::{SymbolKind, SymbolScope};
 use brik::object::write::{Object, SymbolId};
 
 use alive_map::AliveMap;
-use anyhow::{bail, Result};
 
 pub enum Imm {
     Int(i64), // can be any size
@@ -55,6 +56,57 @@ impl fmt::Display for FinishError {
             Self::Encoder(e) => e.fmt(f),
             Self::Assembler(e) => e.rendered.fmt(f)
         }
+    }
+}
+
+pub enum EncoderError<'a> {
+    InvalidImm(&'a str),
+    InvalidAqrl(&'a str),
+    InvalidRegister(&'a str),
+    Other(Cow<'a, str>)
+}
+
+use EncoderError as EE;
+
+impl fmt::Debug for EE<'_> {
+    #[inline(always)]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self, f)
+    }
+}
+
+impl fmt::Display for EE<'_> {
+    #[inline(always)]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidImm(imm) => write!(f, "invalid imm: {imm}"),
+            Self::InvalidAqrl(aqrl) => write!(f, "invalid aqrl specifier: {aqrl}"),
+            Self::InvalidRegister(reg) => write!(f, "invalid register: {reg}"),
+            Self::Other(s) => s.fmt(f)
+        }
+    }
+}
+
+impl Error for EE<'_> {}
+
+impl<'a> From<&'a str> for EE<'a> {
+    #[inline(always)]
+    fn from(b: &'a str) -> Self {
+        EE::Other(Cow::Borrowed(b))
+    }
+}
+
+impl<'a> From<Box<str>> for EE<'a> {
+    #[inline(always)]
+    fn from(b: Box<str>) -> Self {
+        EE::Other(Cow::Owned(b.into_string()))
+    }
+}
+
+impl<'a> EE<'a> {
+    #[inline(always)]
+    pub const fn from_str(s: &'a str) -> Self {
+        Self::Other(Cow::Borrowed(s))
     }
 }
 
@@ -150,7 +202,7 @@ impl<'a> Encoder<'a> {
         self.intern_sym(name, sym_id);
     }
 
-    pub fn encode_inst(&mut self, m: Mnemonic, operands: &str) -> Result<()> {
+    pub fn encode_inst<'b>(&mut self, m: Mnemonic, operands: &'b str) -> Result<(), EE<'b>> {
         match m {
             SD => {
                 let (s2, rest) = parse_reg(operands)?;
@@ -247,7 +299,7 @@ impl<'a> Encoder<'a> {
                     Imm::Int(val) => {
                         self.emit_bytes(I32::JALR { d: rd, s: rs1, im: val as _ });
                     }
-                    Imm::Sym { .. } => bail!("jalr sym not supported directly")
+                    Imm::Sym { .. } => return Err(EE::from_str("jalr sym not supported directly"))
                 }
             }
             ANDI => {
@@ -258,7 +310,7 @@ impl<'a> Encoder<'a> {
                     Imm::Int(val) => {
                         self.emit_bytes(I32::ANDI { d: rd, s: rs1, im: val as _ });
                     }
-                    Imm::Sym { .. } => bail!("jalr sym not supported directly")
+                    Imm::Sym { .. } => return Err(EE::from_str("andi sym not supported directly"))
                 }
             }
             ORI => {
@@ -269,7 +321,7 @@ impl<'a> Encoder<'a> {
                     Imm::Int(val) => {
                         self.emit_bytes(I32::ORI { d: rd, s: rs1, im: val as _ });
                     }
-                    Imm::Sym { .. } => bail!("jalr sym not supported directly")
+                    Imm::Sym { .. } => return Err(EE::from_str("ori sym not supported directly"))
                 }
             }
             XORI => {
@@ -280,7 +332,7 @@ impl<'a> Encoder<'a> {
                     Imm::Int(val) => {
                         self.emit_bytes(I32::XORI { d: rd, s: rs1, im: val as _ });
                     }
-                    Imm::Sym { .. } => bail!("jalr sym not supported directly")
+                    Imm::Sym { .. } => return Err(EE::from_str("xori sym not supported directly"))
                 }
             }
             SLLI => {
@@ -855,7 +907,7 @@ impl<'a> Encoder<'a> {
         id
     }
 
-    fn try_parse_imm<'b>(&mut self, s: &'b str) -> Result<(Imm, &'b str)> {
+    fn try_parse_imm<'b>(&mut self, s: &'b str) -> Result<(Imm, &'b str), EE<'b>> {
         let s = s.trim();
 
         // Case 1: starts with a digit or minus → parse number
@@ -863,8 +915,10 @@ impl<'a> Encoder<'a> {
             #[allow(clippy::collapsible_if)]
             if first.is_ascii_digit() || first == '-' {
                 let (num, rest) = take_number(s);
-                let num = parse_i(num)?;
-                return Ok((Imm::Int(num), rest));
+                let num = parse_i(num).map_err(|_| {
+                    EE::InvalidImm(s)
+                })?;
+                return Ok((Imm::Int(num), rest))
             }
         }
 
@@ -878,7 +932,9 @@ impl<'a> Encoder<'a> {
             let sign = if rest2.starts_with('+') { 1 } else { -1 };
             rest2 = &rest2[1..];
             let (num, rest3) = take_number(rest2);
-            addend = sign * parse_i::<i64>(num)?;
+            addend = sign * parse_i::<i64>(num).map_err(|_| {
+                EE::InvalidImm(s)
+            })?;
             rest2 = rest3;
         }
 
