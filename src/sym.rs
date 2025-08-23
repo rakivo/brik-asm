@@ -42,6 +42,34 @@ pub struct SymInterner {
     arena: Vec<u8>
 }
 
+#[inline(always)]
+fn hash_(data: &[u8]) -> u64 {
+    wyhash::wyhash(data, 0)
+}
+
+#[inline(always)]
+fn pack16_(name: &[u8]) -> (u64, u64) {
+    let mut lo = 0u64;
+    let mut hi = 0u64;
+    unsafe {
+        let n0 = name.len().min(8);
+        ptr::copy_nonoverlapping(
+            name.as_ptr(),
+            &mut lo as *mut _ as *mut u8,
+            n0
+        );
+        if name.len() > 8 {
+            let n1 = (name.len() - 8).min(8);
+            ptr::copy_nonoverlapping(
+                name.as_ptr().add(8),
+                &mut hi as *mut _ as *mut u8,
+                n1
+            );
+        }
+    }
+    (lo.to_le(), hi.to_le())
+}
+
 impl SymInterner {
     const MIN_CAP  : usize = 64;
     const LOAD_NUM : usize =  7; // load factor ~0.7
@@ -182,32 +210,4 @@ impl SymInterner {
         self.mask = newmask;
         // self.len unchanged
     }
-}
-
-#[inline(always)]
-fn hash_(data: &[u8]) -> u64 {
-    wyhash::wyhash(data, 0)
-}
-
-#[inline(always)]
-fn pack16_(name: &[u8]) -> (u64, u64) {
-    let mut lo = 0u64;
-    let mut hi = 0u64;
-    unsafe {
-        let n0 = name.len().min(8);
-        ptr::copy_nonoverlapping(
-            name.as_ptr(),
-            &mut lo as *mut _ as *mut u8,
-            n0
-        );
-        if name.len() > 8 {
-            let n1 = (name.len() - 8).min(8);
-            ptr::copy_nonoverlapping(
-                name.as_ptr().add(8),
-                &mut hi as *mut _ as *mut u8,
-                n1
-            );
-        }
-    }
-    (lo.to_le(), hi.to_le())
 }

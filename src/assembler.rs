@@ -1,6 +1,7 @@
 use crate::encoder::Encoder;
 use crate::mnemonic::Mnemonic;
-use crate::fm::{BrikFile, FileManager};
+use crate::loc::{Loc, LocDisplay};
+use crate::fm::{BrikFile, FileId, FileManager};
 use crate::parse::{
     parse_i,
     take_string,
@@ -50,16 +51,25 @@ struct MacroDef {
 struct InputLine {
     content: NonNull<u8>,
     len: u32,
-    src_line_number: u32
+    src_loc: Loc
 }
 
 impl InputLine {
+    #[inline(always)]
+    pub const fn empty_file(loc: Loc) -> Self {
+        Self {
+            content: NonNull::dangling(),
+            len: 0,
+            src_loc: loc
+        }
+    }
+
     #[inline(always)]
     pub const fn empty(line_number: u32) -> Self {
         Self {
             content: NonNull::dangling(),
             len: 0,
-            src_line_number: line_number
+            src_loc: Loc(None, line_number)
         }
     }
 
@@ -74,10 +84,10 @@ impl InputLine {
 
 enum InputSource {
     File {
+        loc: Loc,
         content: NonNull<u8>,
         len: usize,
         pos: usize,
-        line_number: u32
     },
     Virtual {
         content: Box<str>,
@@ -88,7 +98,7 @@ enum InputSource {
         content: Box<str>,
         pos: usize,
         line_number: u32,
-        original_line: u32
+        original_loc: Loc
     },
 }
 
@@ -103,7 +113,7 @@ impl InputSource {
     }
 
     #[inline(always)]
-    const fn file_from_str(s: &str) -> Self {
+    const fn file_from_str(s: &str, file_id: FileId) -> Self {
         Self::File {
             content: unsafe {
                 NonNull::new(s.as_ptr() as _).unwrap_unchecked()
@@ -111,28 +121,28 @@ impl InputSource {
 
             len: s.len(),
             pos: 0,
-            line_number: 1
+            loc: Loc(Some(file_id), 1)
         }
     }
 
     #[inline(always)]
     const fn original_line_number(&self) -> u32 {
         match self {
-            Self::File { line_number, .. } |
-            Self::Virtual { line_number, .. } |
-            Self::MacroExpansion { original_line: line_number, .. } => {
-                *line_number
-            }
+            Self::File { loc, .. } => loc.line_number(),
+
+            Self::MacroExpansion { original_loc: loc, .. } => loc.line_number(),
+
+            Self::Virtual { line_number, .. } => *line_number
         }
     }
 
     // Returns (line, should_advance)
     fn peek_line(&self) -> Option<(InputLine, bool)> {
         match self {
-            Self::File { content, len, pos, line_number } => {
+            Self::File { loc, content, len, pos } => {
                 if *pos >= *len {
                     return Some(
-                        (InputLine::empty(*line_number), false)
+                        (InputLine::empty_file(*loc), false)
                     )
                 }
 
@@ -153,7 +163,7 @@ impl InputSource {
                 let line = InputLine {
                     content: NonNull::new(line.as_ptr() as _).unwrap(),
                     len: line.len() as _,
-                    src_line_number: *line_number
+                    src_loc: *loc
                 };
 
                 Some((line, true))
@@ -178,7 +188,7 @@ impl InputSource {
                 let line = InputLine {
                     content: NonNull::new(line.as_ptr() as _).unwrap(),
                     len: line.len() as _,
-                    src_line_number: original_line
+                    src_loc: Loc(None, original_line)
                 };
 
                 Some((line, true))
@@ -200,14 +210,14 @@ impl InputSource {
         }
 
         match self {
-            Self::File { content, len, pos, line_number } => {
+            Self::File { content, len, pos, loc } => {
                 if *pos >= *len { return }
 
                 let slice = unsafe {
                     slice::from_raw_parts(content.as_ptr(), *len)
                 };
 
-                maybe_advance(pos, line_number, slice);
+                maybe_advance(pos, &mut loc.1, slice);
             }
 
             Self::Virtual { content, pos, line_number } |
@@ -224,7 +234,7 @@ pub struct Assembler<'a> {
     enc: Encoder<'a>,
     sections: Sections,
 
-    line_number: u32,
+    loc: Loc,
 
     file_manager: FileManager,
 
@@ -234,8 +244,24 @@ pub struct Assembler<'a> {
 
 impl<'a> Assembler<'a> {
     #[inline]
-    pub fn new(mut enc: Encoder<'a>) -> Self {
-        Self {
+    pub fn new(mut enc: Encoder<'a>, file_path: &str) -> anyhow::Result<Self> {
+        let mut file_manager = FileManager::default();
+
+        let (file_id, bytes) = BrikFile::new(file_path)
+            .and_then(|file| file_manager.read_file(file))
+            .with_context(|| format!("reading input file: {file_path}"))?;
+
+        let str = unsafe {
+            str::from_utf8_unchecked(bytes)
+        };
+
+        let input_stack = vec![
+            InputSource::file_from_str(str, file_id)
+        ];
+
+        let asm = Self {
+            input_stack,
+            file_manager,
             sections: Sections {
                 rodata : enc.add_rodata_section(),
                 text   : enc.add_text_section(),
@@ -243,11 +269,16 @@ impl<'a> Assembler<'a> {
                 bss    : enc.add_bss_section(),
             },
             enc,
-            file_manager: FileManager::default(),
-            line_number: u32::default(),
+            loc: Loc(Some(file_id), 1),
             macros: HashMap::default(),
-            input_stack: Vec::default(),
-        }
+        };
+
+        Ok(asm)
+    }
+
+    #[inline(always)]
+    fn loc_display(&self) -> LocDisplay {
+        self.loc.display(&self.file_manager)
     }
 
     #[inline]
@@ -257,7 +288,7 @@ impl<'a> Assembler<'a> {
 
             let (line, should_advance) = last
                 .peek_line()
-                .unwrap_or((InputLine::empty(self.line_number), false));
+                .unwrap_or((InputLine::empty(self.loc.1), false));
 
             if !should_advance {
                 // source exhausted, pop it
@@ -278,7 +309,7 @@ impl<'a> Assembler<'a> {
 
     #[inline]
     fn append_input_file(&mut self, file_path: &str) -> anyhow::Result<()> {
-        let bytes = BrikFile::new(file_path)
+        let (file_id, bytes) = BrikFile::new(file_path)
             .and_then(|file| self.file_manager.read_file(file))
             .with_context(|| format!("reading input file: {file_path}"))?;
 
@@ -286,19 +317,18 @@ impl<'a> Assembler<'a> {
             str::from_utf8_unchecked(bytes)
         };
 
-        self.input_stack.push(InputSource::file_from_str(str));
+        self.input_stack.push(InputSource::file_from_str(str, file_id));
 
         Ok(())
     }
 
-    pub fn assemble_file(mut self, file_path: &str) -> anyhow::Result<Object<'a>> {
+    pub fn assemble(mut self) -> anyhow::Result<Object<'a>> {
         self.enc.position_at_end(self.sections.text);
 
-        self.append_input_file(file_path)?;
-
         while let Some(line) = self.get_next_line() {
-            let line_number = line.src_line_number;
-            self.line_number = line_number;
+            self.loc = line.src_loc;
+
+            let loc = line.src_loc.display(&self.file_manager);
 
             let line = line.as_str();
             let line = line.strip_suffix('\n').unwrap_or(line);
@@ -332,6 +362,7 @@ impl<'a> Assembler<'a> {
                         s.section = SymbolSection::Section(curr_section);
                         s.value = curr_offset;
                     });
+                    self.enc.mark_sym_defined(sym_id);
                 }
 
                 self.enc.place_or_add_label_here(
@@ -346,7 +377,7 @@ impl<'a> Assembler<'a> {
                 continue
             }
 
-            let fl_context = || format!("{file_path}:{line_number}:");
+            let fl_context = || format!("{loc}:");
 
             if first_byte == b'.' {
                 self.handle_directive(line)
@@ -378,13 +409,15 @@ impl<'a> Assembler<'a> {
                 .with_context(fl_context)?;
 
             self.enc
-                .encode_inst(m, rest)
+                .encode_inst(m, rest, self.loc)
                 .with_context(fl_context)?;
         }
 
+        let file_path = self.loc_display().file_path;
+
         self.enc
-            .finish()
-            .map_err(|e| anyhow::anyhow!(e.rendered))
+            .finish(&self.file_manager)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
             .with_context(|| format!{
                 "generating object file for {file_path}",
             })
@@ -445,6 +478,7 @@ impl<'a> Assembler<'a> {
                     s.scope   = SymbolScope::Dynamic;
                     s.weak    = false;
                 });
+                self.enc.mark_sym_defined(sym_id);
                 self.enc.intern_sym(name, sym_id);
             }
 
@@ -586,7 +620,7 @@ impl<'a> Assembler<'a> {
             MacroDef {
                 params,
                 body: body.into(),
-                defined_at_line: self.line_number,
+                defined_at_line: self.loc.line_number(),
             }
         );
 
@@ -625,7 +659,7 @@ impl<'a> Assembler<'a> {
             content: expanded,
             pos: 0,
             line_number: 1,
-            original_line: self.line_number,
+            original_loc: self.loc
         });
 
         Ok(())

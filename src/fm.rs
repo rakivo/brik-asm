@@ -1,4 +1,5 @@
 use std::hint;
+use std::rc::Rc;
 use std::io::{self, Read};
 use std::fs::{self, File};
 use std::collections::HashMap;
@@ -45,7 +46,7 @@ impl BrikFileContents {
 #[derive(Debug)]
 pub struct BrikFile {
     // user path (not canonicalized)
-    pub upath: String,
+    pub upath: Rc<str>,
 
     pub meta: fs::Metadata,
 
@@ -59,7 +60,7 @@ impl BrikFile {
     pub fn new(upath: &str) -> io::Result<Self> {
         let handle = File::open(upath)?;
         let meta = handle.metadata()?;
-        let upath = upath.to_owned();
+        let upath = upath.into();
 
         Ok(Self { meta, upath, handle, contents: None })
     }
@@ -159,6 +160,12 @@ impl FileManager {
         &self.files[&file_id]
     }
 
+    #[track_caller]
+    #[inline(always)]
+    pub fn get_file_path_rc_unchecked(&self, file_id: FileId) -> Rc<str> {
+        Rc::clone(&self.files[&file_id].upath)
+    }
+
     #[inline]
     fn next_file_id(&mut self) -> FileId {
         let id = self.file_id;
@@ -167,8 +174,8 @@ impl FileManager {
     }
 
     #[inline]
-    pub fn read_file(&mut self, file: BrikFile) -> io::Result<&[u8]> {
-        let canon = fs::canonicalize(&file.upath)?
+    pub fn read_file(&mut self, file: BrikFile) -> io::Result<(FileId, &[u8])> {
+        let canon = fs::canonicalize(&*file.upath)?
             .to_string_lossy()
             .into_owned();
 
@@ -178,7 +185,7 @@ impl FileManager {
                 .read_contents_unchecked()
                 .as_bytes();
 
-            return Ok(bytes)
+            return Ok((old_file_id, bytes))
         }
 
         let file_id = self.next_file_id();
@@ -188,6 +195,6 @@ impl FileManager {
         let e = e.insert_entry(file);
 
         let file = e.into_mut();
-        file.read()
+        file.read().map(|r| (file_id, r))
     }
 }

@@ -1,3 +1,5 @@
+use crate::loc::Loc;
+use crate::fm::FileManager;
 use crate::sym::SymInterner;
 use crate::mnemonic::Mnemonic::{self, *};
 use crate::parse::{
@@ -11,6 +13,7 @@ use crate::parse::{
     ensure_empty,
 };
 
+use std::fmt::{self, Write};
 use std::ops::{Deref, DerefMut};
 
 use brik::rv64::I64;
@@ -18,10 +21,10 @@ use brik::rv32::I32;
 use brik::rv32::Reg::*;
 use brik::asm::Assembler;
 use brik::asm::label::LabelId;
-use brik::asm::errors::FinishError;
 use brik::object::{SymbolKind, SymbolScope};
 use brik::object::write::{Object, SymbolId};
 
+use alive_map::AliveMap;
 use anyhow::{bail, Result};
 
 pub enum Imm {
@@ -32,9 +35,34 @@ pub enum Imm {
     }
 }
 
+pub struct UndefSym {
+    loc: Loc
+}
+
+pub struct UndefSymsDiagnostics {
+    rendered: String,
+}
+
+pub enum FinishError {
+    Assembler(UndefSymsDiagnostics),
+    Encoder(brik::asm::errors::FinishError)
+}
+
+impl fmt::Display for FinishError {
+    #[inline(always)]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Encoder(e) => e.fmt(f),
+            Self::Assembler(e) => e.rendered.fmt(f)
+        }
+    }
+}
+
 pub struct Encoder<'a> {
     asm: Assembler<'a>,
-    sin: SymInterner
+    sin: SymInterner,
+
+    undef_syms: AliveMap<SymbolId, UndefSym>
 }
 
 impl<'a> Deref for Encoder<'a> {
@@ -55,17 +83,43 @@ impl DerefMut for Encoder<'_> {
 impl<'a> Encoder<'a> {
     #[inline]
     pub fn new(asm: Assembler<'a>) -> Self {
-        Self { asm, sin: SymInterner::new() }
+        Self {
+            asm,
+            sin: SymInterner::new(),
+            undef_syms: AliveMap::new()
+        }
     }
 
     #[inline(always)]
-    pub fn finish(self) -> Result<Object<'a>, FinishError> {
-        self.asm.finish()
+    pub fn finish(self, fm: &FileManager) -> Result<Object<'a>, FinishError> {
+        if self.undef_syms.is_empty() {
+             return self.asm.finish().map_err(FinishError::Encoder)
+        }
+
+        let mut rendered = String::new();
+
+        for (&id, UndefSym { loc }) in self.undef_syms.iter() {
+            writeln!{
+                rendered,
+                "{loc}: symbol '{name}' is undefined",
+                loc = loc.display(fm),
+                name = unsafe {
+                    str::from_utf8_unchecked(&self.symbol(id).name)
+                }
+            }.expect("[could not write undef labels diagnostics]");
+        }
+
+        Err(FinishError::Assembler(UndefSymsDiagnostics { rendered }))
     }
 
     #[inline(always)]
     pub fn symbol_id(&self, name: &[u8]) -> Option<SymbolId> {
         self.sin.get(name)
+    }
+
+    #[inline(always)]
+    pub fn mark_sym_defined(&mut self, id: SymbolId) {
+        _ = self.undef_syms.remove(&id)
     }
 
     #[inline(always)]
@@ -91,7 +145,8 @@ impl<'a> Encoder<'a> {
     pub fn encode_inst(
         &mut self,
         m: Mnemonic,
-        operands: &str
+        operands: &str,
+        loc: Loc
     ) -> Result<()> {
         match m {
             SD => {
@@ -109,7 +164,7 @@ impl<'a> Encoder<'a> {
             ADDI => {
                 let (rd, rest) = parse_reg(operands)?;
                 let (rs1, rest) = parse_reg(rest)?;
-                let (imm, _rest) = self.try_parse_imm(rest)?;
+                let (imm, _rest) = self.try_parse_imm(rest, loc)?;
                 maybe_reloc!(self, ADDI, rd=rd, rs1=rs1, imm=imm, kind=RelocKind::PcrelLo12I);
             }
             EBREAK => {
@@ -127,7 +182,7 @@ impl<'a> Encoder<'a> {
             }
             LUI => {
                 let (rd, rest) = parse_reg(operands)?;
-                let (imm, _rest) = self.try_parse_imm(rest)?;
+                let (imm, _rest) = self.try_parse_imm(rest, loc)?;
                 maybe_reloc!(self, LUI, rd=rd, imm=imm, kind=RelocKind::PcrelHi20);
             }
             LI => {
@@ -137,7 +192,7 @@ impl<'a> Encoder<'a> {
             }
             LA => {
                 let (rd, rest) = parse_reg(operands)?;
-                let (imm, _rest) = self.try_parse_imm(rest)?;
+                let (imm, _rest) = self.try_parse_imm(rest, loc)?;
                 match imm {
                     Imm::Sym { sym, addend } => {
                         self.emit_pcrel_load_addr(rd, sym, addend);
@@ -152,7 +207,7 @@ impl<'a> Encoder<'a> {
             }
             AUIPC => {
                 let (rd, rest) = parse_reg(operands)?;
-                let (imm, _rest) = self.try_parse_imm(rest)?;
+                let (imm, _rest) = self.try_parse_imm(rest, loc)?;
                 maybe_reloc!(self, AUIPC, rd=rd, imm=imm, kind=RelocKind::PcrelHi20);
             }
             CALL => {
@@ -161,7 +216,7 @@ impl<'a> Encoder<'a> {
                         I32::JALR { d: RA, s, im: 0 }
                     );
                 } else {
-                    let (imm, _rest) = self.try_parse_imm(operands)?;
+                    let (imm, _rest) = self.try_parse_imm(operands, loc)?;
                     match imm {
                         Imm::Int(val) => {
                             let rd = T0;
@@ -178,13 +233,13 @@ impl<'a> Encoder<'a> {
             }
             JAL => {
                 let (rd, rest) = parse_reg(operands)?;
-                let (imm, _rest) = self.try_parse_imm(rest)?;
+                let (imm, _rest) = self.try_parse_imm(rest, loc)?;
                 maybe_reloc!(self, JAL, rd=rd, imm=imm, kind=RelocKind::Jal);
             }
             JALR => {
                 let (rd, rest) = parse_reg(operands)?;
                 let (rs1, rest) = parse_reg(rest)?;
-                let (imm, _rest) = self.try_parse_imm(rest)?;
+                let (imm, _rest) = self.try_parse_imm(rest, loc)?;
                 match imm {
                     Imm::Int(val) => {
                         self.emit_bytes(I32::JALR { d: rd, s: rs1, im: val as _ });
@@ -195,7 +250,7 @@ impl<'a> Encoder<'a> {
             ANDI => {
                 let (rd, rest) = parse_reg(operands)?;
                 let (rs1, rest) = parse_reg(rest)?;
-                let (imm, _rest) = self.try_parse_imm(rest)?;
+                let (imm, _rest) = self.try_parse_imm(rest, loc)?;
                 match imm {
                     Imm::Int(val) => {
                         self.emit_bytes(I32::ANDI { d: rd, s: rs1, im: val as _ });
@@ -206,7 +261,7 @@ impl<'a> Encoder<'a> {
             ORI => {
                 let (rd, rest) = parse_reg(operands)?;
                 let (rs1, rest) = parse_reg(rest)?;
-                let (imm, _rest) = self.try_parse_imm(rest)?;
+                let (imm, _rest) = self.try_parse_imm(rest, loc)?;
                 match imm {
                     Imm::Int(val) => {
                         self.emit_bytes(I32::ORI { d: rd, s: rs1, im: val as _ });
@@ -217,7 +272,7 @@ impl<'a> Encoder<'a> {
             XORI => {
                 let (rd, rest) = parse_reg(operands)?;
                 let (rs1, rest) = parse_reg(rest)?;
-                let (imm, _rest) = self.try_parse_imm(rest)?;
+                let (imm, _rest) = self.try_parse_imm(rest, loc)?;
                 match imm {
                     Imm::Int(val) => {
                         self.emit_bytes(I32::XORI { d: rd, s: rs1, im: val as _ });
@@ -247,42 +302,42 @@ impl<'a> Encoder<'a> {
             BEQ => {
                 let (s1, rest) = parse_reg(operands)?;
                 let (s2, rest) = parse_reg(rest)?;
-                let (imm, rest) = self.try_parse_imm(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest, loc)?;
                 ensure_empty(rest)?;
                 maybe_reloc!(self, BEQ, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
             }
             BNE => {
                 let (s1, rest) = parse_reg(operands)?;
                 let (s2, rest) = parse_reg(rest)?;
-                let (imm, rest) = self.try_parse_imm(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest, loc)?;
                 ensure_empty(rest)?;
                 maybe_reloc!(self, BNE, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
             }
             BLT => {
                 let (s1, rest) = parse_reg(operands)?;
                 let (s2, rest) = parse_reg(rest)?;
-                let (imm, rest) = self.try_parse_imm(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest, loc)?;
                 ensure_empty(rest)?;
                 maybe_reloc!(self, BLT, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
             }
             BGE => {
                 let (s1, rest) = parse_reg(operands)?;
                 let (s2, rest) = parse_reg(rest)?;
-                let (imm, rest) = self.try_parse_imm(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest, loc)?;
                 ensure_empty(rest)?;
                 maybe_reloc!(self, BGE, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
             }
             BLTU => {
                 let (s1, rest) = parse_reg(operands)?;
                 let (s2, rest) = parse_reg(rest)?;
-                let (imm, rest) = self.try_parse_imm(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest, loc)?;
                 ensure_empty(rest)?;
                 maybe_reloc!(self, BLTU, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
             }
             BGEU => {
                 let (s1, rest) = parse_reg(operands)?;
                 let (s2, rest) = parse_reg(rest)?;
-                let (imm, rest) = self.try_parse_imm(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest, loc)?;
                 ensure_empty(rest)?;
                 maybe_reloc!(self, BGEU, rs1=s1, rs2=s2, imm=imm, kind=RelocKind::Branch);
             }
@@ -349,14 +404,14 @@ impl<'a> Encoder<'a> {
             SLTI => {
                 let (d, rest) = parse_reg(operands)?;
                 let (s, rest) = parse_reg(rest)?;
-                let (imm, rest) = self.try_parse_imm(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest, loc)?;
                 ensure_empty(rest)?;
                 maybe_reloc!(self, SLTI, rd=d, rs1=s, imm=imm, kind=RelocKind::PcrelLo12I);
             }
             SLTIU => {
                 let (d, rest) = parse_reg(operands)?;
                 let (s, rest) = parse_reg(rest)?;
-                let (imm, rest) = self.try_parse_imm(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest, loc)?;
                 ensure_empty(rest)?;
                 maybe_reloc!(self, SLTIU, rd=d, rs1=s, imm=imm, kind=RelocKind::PcrelLo12I);
             }
@@ -588,7 +643,7 @@ impl<'a> Encoder<'a> {
             ADDIW => {
                 let (d, rest) = parse_reg(operands)?;
                 let (s, rest) = parse_reg(rest)?;
-                let (imm, rest) = self.try_parse_imm(rest)?;
+                let (imm, rest) = self.try_parse_imm(rest, loc)?;
                 ensure_empty(rest)?;
                 maybe_reloc!(self, ADDIW, rd=d, rs1=s, imm=imm, kind=RelocKind::PcrelLo12I);
             }
@@ -775,7 +830,11 @@ impl<'a> Encoder<'a> {
     }
 
     #[inline]
-    fn lookup_or_intern_symbol(&mut self, name: impl AsRef<[u8]>) -> SymbolId {
+    fn lookup_or_intern_symbol(
+        &mut self,
+        name: impl AsRef<[u8]>,
+        loc: Loc
+    ) -> SymbolId {
         let name = name.as_ref();
 
         if let Some(id) = self.sin.get(name) { return id }
@@ -788,10 +847,16 @@ impl<'a> Encoder<'a> {
 
         self.sin.intern(name, id);
 
+        self.undef_syms.insert(id, UndefSym { loc });
+
         id
     }
 
-    fn try_parse_imm<'b>(&mut self, s: &'b str) -> Result<(Imm, &'b str)> {
+    fn try_parse_imm<'b>(
+        &mut self,
+        s: &'b str,
+        loc: Loc
+    ) -> Result<(Imm, &'b str)> {
         let s = s.trim();
 
         // Case 1: starts with a digit or minus → parse number
@@ -806,7 +871,7 @@ impl<'a> Encoder<'a> {
 
         // Case 2: parse symbol name (alnum + '_' allowed)
         let (sym_str, rest) = take_ident(s);
-        let sym = self.lookup_or_intern_symbol(sym_str);
+        let sym = self.lookup_or_intern_symbol(sym_str, loc);
 
         let mut addend = 0;
         let mut rest2 = rest.trim_start();
@@ -821,4 +886,3 @@ impl<'a> Encoder<'a> {
         Ok((Imm::Sym { sym, addend }, rest2))
     }
 }
-

@@ -14,7 +14,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::{fs, io, str};
 use std::path::{Path, PathBuf};
 
-use brik::asm::Assembler;
 use brik::asm::arch::Arch;
 use brik::object::{
     FileFlags,
@@ -29,6 +28,7 @@ use anyhow::{Context, Result};
 mod util;
 
 mod fm;
+mod loc;
 mod sym;
 mod parse;
 mod encoder;
@@ -61,7 +61,7 @@ fn main() -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| default_out(&args.input).expect("output"));
 
-    let mut asm = Assembler::new(
+    let mut asm = brik::asm::Assembler::new(
         BinaryFormat::Elf,
         Arch::Riscv64,
         Endianness::Little,
@@ -74,9 +74,12 @@ fn main() -> anyhow::Result<()> {
         e_flags: 0x4
     });
 
-    let asm = assembler::Assembler::new(Encoder::new(asm));
+    let asm = assembler::Assembler::new(
+        Encoder::new(asm),
+        &args.input.to_string_lossy()
+    )?;
 
-    let obj = asm.assemble_file(&args.input.to_string_lossy())
+    let obj = asm.assemble()
         .with_context(|| format!{
             "assembling {f}",
             f = &args.input.display()
