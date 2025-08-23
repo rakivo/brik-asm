@@ -50,7 +50,10 @@ overflow-checks = false
 
 [profile.profiling]
 inherits = "release"
-debug = 1
+debug = true                      # keep DWARF symbols
+split-debuginfo = "packed"        # so perf can find them easily (Linux)
+strip = "none"                    # don’t strip symbols
 lto = false
 codegen-units = 16
 overflow-checks = false
+panic = "abort"                   # optional: less noise, smaller code
