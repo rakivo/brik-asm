@@ -14,7 +14,7 @@ mimalloc = { version = "0.1.47", optional = true }
 cfg-if = "1.0.3"
 wyhash = { version = "0.6.0", default-features = false }
 bytecount = "0.6.9"
-alive-map = { git = "https://github.com/rakivo/alive-map" }
+alive-map = { git = "https://github.com/rakivo/alive-map", rev = "0cebc77" }
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2.175", optional = true } # madvise
