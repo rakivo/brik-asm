@@ -1,4 +1,5 @@
-use std::{fmt, rc::Rc};
+use std::fmt;
+use std::rc::Rc;
 
 use crate::fm::{FileId, FileManager};
 

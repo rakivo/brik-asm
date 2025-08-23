@@ -6,8 +6,10 @@ use std::collections::HashMap;
 
 use memmap2::{Mmap, MmapOptions};
 
+type FileId_ = u16;
+
 #[derive(Eq, Hash, Copy, Clone, Debug, PartialEq)]
-pub struct FileId(u32);
+pub struct FileId(FileId_);
 
 #[derive(Debug)]
 pub enum BrikFileContents {
@@ -147,7 +149,7 @@ impl BrikFile {
 pub struct FileManager {
     pub files: HashMap<FileId, BrikFile, wyhash::WyHasherBuilder>,
 
-    file_id: u32,
+    file_id: FileId_,
 
     // seen canonicalized filepaths
     seen: HashMap<String, FileId, wyhash::WyHasherBuilder>,

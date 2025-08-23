@@ -34,8 +34,6 @@ mod encoder;
 mod mnemonic;
 mod assembler;
 
-use encoder::Encoder;
-
 #[derive(Debug, Parser)]
 #[command(version, about = "Single-pass RISC-V assembler")]
 struct Args {
@@ -74,7 +72,7 @@ fn main() -> anyhow::Result<()> {
     });
 
     let asm = assembler::Assembler::new(
-        Encoder::new(asm),
+        asm,
         &args.input.to_string_lossy()
     )?;
 

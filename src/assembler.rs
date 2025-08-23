@@ -234,17 +234,15 @@ pub struct Assembler<'a> {
     enc: Encoder<'a>,
     sections: Sections,
 
-    loc: Loc,
-
     file_manager: FileManager,
 
-    macros: HashMap<String, MacroDef, wyhash::WyHasherBuilder>,
+    macros: HashMap<Box<str>, MacroDef, wyhash::WyHasherBuilder>,
     input_stack: Vec<InputSource>,
 }
 
 impl<'a> Assembler<'a> {
     #[inline]
-    pub fn new(mut enc: Encoder<'a>, file_path: &str) -> anyhow::Result<Self> {
+    pub fn new(asm: brik::asm::Assembler<'a>, file_path: &str) -> anyhow::Result<Self> {
         let mut file_manager = FileManager::default();
 
         let (file_id, bytes) = BrikFile::new(file_path)
@@ -259,6 +257,8 @@ impl<'a> Assembler<'a> {
             InputSource::file_from_str(str, file_id)
         ];
 
+        let mut enc = Encoder::new(asm, file_id);
+
         let asm = Self {
             input_stack,
             file_manager,
@@ -269,7 +269,6 @@ impl<'a> Assembler<'a> {
                 bss    : enc.add_bss_section(),
             },
             enc,
-            loc: Loc(Some(file_id), 1),
             macros: HashMap::default(),
         };
 
@@ -278,7 +277,7 @@ impl<'a> Assembler<'a> {
 
     #[inline(always)]
     fn loc_display(&self) -> LocDisplay {
-        self.loc.display(&self.file_manager)
+        self.enc.loc.display(&self.file_manager)
     }
 
     #[inline]
@@ -288,7 +287,7 @@ impl<'a> Assembler<'a> {
 
             let (line, should_advance) = last
                 .peek_line()
-                .unwrap_or((InputLine::empty(self.loc.1), false));
+                .unwrap_or((InputLine::empty(self.enc.loc.1), false));
 
             if !should_advance {
                 // source exhausted, pop it
@@ -326,7 +325,7 @@ impl<'a> Assembler<'a> {
         self.enc.position_at_end(self.sections.text);
 
         while let Some(line) = self.get_next_line() {
-            self.loc = line.src_loc;
+            self.enc.loc = line.src_loc;
 
             let loc = line.src_loc.display(&self.file_manager);
 
@@ -409,7 +408,7 @@ impl<'a> Assembler<'a> {
                 .with_context(fl_context)?;
 
             self.enc
-                .encode_inst(m, rest, self.loc)
+                .encode_inst(m, rest)
                 .with_context(fl_context)?;
         }
 
@@ -616,11 +615,11 @@ impl<'a> Assembler<'a> {
         }
 
         self.macros.insert(
-            name.to_owned(),
+            name.to_owned().into(),
             MacroDef {
                 params,
                 body: body.into(),
-                defined_at_line: self.loc.line_number(),
+                defined_at_line: self.enc.loc.line_number(),
             }
         );
 
@@ -659,7 +658,7 @@ impl<'a> Assembler<'a> {
             content: expanded,
             pos: 0,
             line_number: 1,
-            original_loc: self.loc
+            original_loc: self.enc.loc
         });
 
         Ok(())
