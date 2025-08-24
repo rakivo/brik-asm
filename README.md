@@ -40,8 +40,7 @@ main:
 
 .rodata
 msg:
-    .ascii "Hello from RISC-V!"
-    .byte 10, 0
+    .stringz "Hello from RISC-V!\n"
 ```
 
 ---
@@ -83,18 +82,14 @@ done:
 
 .rodata
 fmt1:
-    .ascii "t0      = %ld"
-    .byte 10, 0
+    .stringz "t0      = %ld\n"
 
 fmt2:
-    .ascii "neg(t0) = %ld"
-    .byte 10, 0
+    .stringz "neg(t0) = %ld\n"
 
 fmt3:
-    .ascii "not(t0) = %ld"
-    .byte 10, 0
+    .stringz "not(t0) = %ld\n"
 
 fmt_skip:
-    .ascii "this should not print, t0=%ld"
-    .byte 10, 0
+    .stringz "this should not print, t0=%ld\n"
 ```
