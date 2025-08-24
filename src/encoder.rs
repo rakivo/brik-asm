@@ -1,3 +1,5 @@
+// TODO(#17): Better error handling in `encoder` module
+
 use crate::loc::Loc;
 use crate::sym::SymInterner;
 use crate::fm::{FileId, FileManager};
@@ -910,7 +912,7 @@ impl<'a> Encoder<'a> {
     fn try_parse_imm<'b>(&mut self, s: &'b str) -> Result<(Imm, &'b str), EE<'b>> {
         let s = s.trim();
 
-        // Case 1: starts with a digit or minus → parse number
+        // Case 1: starts with a digit or minus -> parse number
         if let Some(first) = s.chars().next() {
             #[allow(clippy::collapsible_if)]
             if first.is_ascii_digit() || first == '-' {
