@@ -35,6 +35,7 @@ mod error;
 mod parse;
 mod encoder;
 mod mnemonic;
+mod macro_def;
 mod assembler;
 
 #[derive(Debug, Parser)]

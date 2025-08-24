@@ -3,6 +3,7 @@ use crate::error::prelude::*;
 use crate::mnemonic::Mnemonic;
 use crate::util::unescape_string;
 use crate::loc::{Loc, LocDisplay};
+use crate::macro_def::{MacroDef, MacroKind};
 use crate::fm::{BrikFile, FileId, FileManager};
 use crate::parse::{
     take_hex,
@@ -13,8 +14,8 @@ use crate::parse::{
     first_token_and_rest
 };
 
-use std::fmt;
 use std::rc::Rc;
+use std::{fmt, hint};
 use std::borrow::Cow;
 use std::ptr::NonNull;
 use std::{str, slice};
@@ -36,21 +37,16 @@ use anyhow::{bail, Context};
 
 const MACRO_RECURSION_LIMIT: usize = 64;
 
-const STANDARD_LIBRARY_FILE_PATH: &str = "std";
+const STANDARD_LIBRARY_FILE_PATH : &str = "std";
+const STANDARD_LIBRARY           : &str = include_str!("../std.s");
 
-const STANDARD_LIBRARY: &str = include_str!("../std.s");
+const MACRO_KEYWORD_WITH_RPAD: &str = "define ";
 
 pub struct Sections {
     text   : SectionId,
     data   : SectionId,
     rodata : SectionId,
     bss    : SectionId,
-}
-
-struct MacroDef {
-    params: Rc<[Box<str>]>,
-    body: Rc<str>,
-    src_loc: Loc
 }
 
 #[derive(Copy, Clone)]
@@ -115,7 +111,7 @@ enum InputSource {
         line_number: u32,
     },
     MacroExpansion {
-        content: Box<str>,
+        content: Rc<str>,
         pos: usize,
         line_number: u32,
         original_loc: Loc
@@ -189,8 +185,18 @@ impl InputSource {
                 Some((line, true))
             }
 
-            Self::Virtual { content, pos, .. } |
-            Self::MacroExpansion { content, pos, .. } => {
+            Self::Virtual { pos, .. } |
+            Self::MacroExpansion { pos, .. } => {
+                // doing this because content in Virtual and MacroExpansion are
+                // different types: Box<str> and Rc<str>
+                let content = match self {
+                    Self::File { .. } => unsafe {
+                        hint::unreachable_unchecked()
+                    },
+                    Self::Virtual { content, .. } => content.as_ref(),
+                    Self::MacroExpansion { content, .. } => content.as_ref(),
+                };
+
                 let original_line = self.original_line_number();
 
                 if *pos >= content.len() {
@@ -240,10 +246,13 @@ impl InputSource {
                 maybe_advance(pos, &mut loc.1, slice);
             }
 
-            Self::Virtual { content, pos, line_number } |
+            Self::Virtual { content, pos, line_number } => {
+                if *pos >= content.len() { return }
+                maybe_advance(pos, line_number, content.as_bytes());
+            }
+
             Self::MacroExpansion { content, pos, line_number, .. } => {
                 if *pos >= content.len() { return }
-
                 maybe_advance(pos, line_number, content.as_bytes());
             }
         }
@@ -419,7 +428,7 @@ impl<'a> Assembler<'a> {
                 continue
             }
 
-            if line_bytes.starts_with(b"macro ") {
+            if line_bytes.starts_with(MACRO_KEYWORD_WITH_RPAD.as_bytes()) {
                 if let Err(e) = self.handle_macro_definition(line) {
                     break Some(e)
                 }
@@ -632,24 +641,48 @@ impl<'a> Assembler<'a> {
     }
 
      fn handle_macro_definition(&mut self, line: &str) -> Result<()> {
+        // "macro name [pptoken]"
         // "macro name [..param] {"
-        let Some(header) = line
-            .strip_prefix("macro ")
-            .and_then(|s| s.strip_suffix("{"))
-        else {
+
+        let Some(header) = line.strip_prefix(MACRO_KEYWORD_WITH_RPAD) else {
             return Err(self.error_macro_invalid_header())
         };
 
-        let mut parts = header.split_whitespace();
+        let Some(header) = header.strip_suffix("{") else {
+            let (name, rest) = split_at_space(header);
 
-        let Some(name) = parts.next() else {
-            return Err(self.error_macro_invalid_header())
+            let name = name.trim();
+            let rest = rest.trim();
+
+            self.macros.insert(
+                name.to_owned().into(),
+                MacroDef {
+                    kind: MacroKind::Object(
+                        rest.trim().into()
+                    ),
+                    src_loc: self.enc.loc,
+                }
+            );
+
+            return Ok(())
         };
 
-        let params = parts
+        let header = header.trim_start();
+
+        let (name, rest) = split_at_space(header);
+
+        let name = name.trim();
+        let rest = rest.trim();
+
+        if name.is_empty() {
+            return Err(self.error_macro_invalid_header())
+        }
+
+        let params = rest
+            .split_whitespace()
             .map(|s| s.strip_prefix('$').unwrap_or(s))
             .map(Into::into)
-            .collect();
+            .collect::<Vec<_>>();
 
         // collect macro body until we find closing brace at same nesting level.
         let mut body = String::new();
@@ -680,8 +713,10 @@ impl<'a> Assembler<'a> {
         self.macros.insert(
             name.to_owned().into(),
             MacroDef {
-                params,
-                body: body.into(),
+                kind: MacroKind::Function {
+                    params: params.into(),
+                    body: body.into()
+                },
                 src_loc: self.enc.loc,
             }
         );
@@ -691,26 +726,32 @@ impl<'a> Assembler<'a> {
 
     fn call_macro(&mut self, name: &str, args_str: &str) -> Result<()> {
         let macro_def = self.macros.get(name).unwrap();
-        let (params, body) = (
-            Rc::clone(&macro_def.params),
-            Rc::clone(&macro_def.body)
-        );
 
-        let args = args_str.split_whitespace()
-            .map(|arg| arg.strip_suffix(',').unwrap_or(arg))
-            .collect::<Vec<_>>();
+        let expanded = match &macro_def.kind {
+            MacroKind::Object(s) => Rc::clone(s),
+            MacroKind::Function { params, body } => {
+                let (params, body) = (
+                    Rc::clone(&params),
+                    Rc::clone(&body)
+                );
 
-        if args.len() != params.len() {
-            let e = self.error_macro_arg_count_with_msg(format!{
-                "expected {a} arguments, got {b}\nnote: macro defined here: {loc}",
-                a = params.len(),
-                b = args.len(),
-                loc = macro_def.src_loc.display(&self.file_manager)
-            });
-            return Err(e)
-        }
+                let args = args_str.split_whitespace()
+                    .map(|arg| arg.strip_suffix(',').unwrap_or(arg))
+                    .collect::<Vec<_>>();
 
-        let expanded = self.expand_macro_body(&body, &params, &args)?;
+                if args.len() != params.len() {
+                    let e = self.error_macro_arg_count_with_msg(format!{
+                        "expected {a} arguments, got {b}\nnote: macro defined here: {loc}",
+                        a = params.len(),
+                        b = args.len(),
+                        loc = macro_def.src_loc.display(&self.file_manager)
+                    });
+                    return Err(e)
+                }
+
+                self.expand_macro_body(&body, &params, &args)?.into()
+            }
+        };
 
         self.input_stack.push(InputSource::MacroExpansion {
             content: expanded,
@@ -779,39 +820,44 @@ impl<'a> Assembler<'a> {
                 continue
             };
 
-            let nested_args = match rest_opt {
-                Some(rest) => rest
-                    .split_whitespace()
-                    .map(|arg| arg.strip_suffix(',').unwrap_or(arg))
-                    .collect(),
+            match &nested_def.kind {
+                MacroKind::Object(s) => out.push_str(s),
+                MacroKind::Function { params, body } => {
+                    let nested_args = match rest_opt {
+                        Some(rest) => rest
+                            .split_whitespace()
+                            .map(|arg| arg.strip_suffix(',').unwrap_or(arg))
+                            .collect(),
 
-                None => const { Vec::new() }
-            };
+                        None => const { Vec::new() }
+                    };
 
-            if nested_args.len() != nested_def.params.len() {
-                let e = self.error_macro_arg_count_with_msg(format!{
-                    "expected {a} arguments, got {b}\nnote: macro defined here: {loc}",
-                    a = nested_def.params.len(),
-                    b = nested_args.len(),
-                    loc = nested_def.src_loc.display(&self.file_manager)
-                });
+                    if nested_args.len() != params.len() {
+                        let e = self.error_macro_arg_count_with_msg(format!{
+                            "expected {a} arguments, got {b}\nnote: macro defined here: {loc}",
+                            a = params.len(),
+                            b = nested_args.len(),
+                            loc = nested_def.src_loc.display(&self.file_manager)
+                        });
 
-                return Err(e)
+                        return Err(e)
+                    }
+
+                    let nested_args_map = HashMap::from_iter(
+                        params
+                            .iter()
+                            .map(AsRef::as_ref)
+                            .zip(nested_args.iter().map(AsRef::as_ref))
+                    );
+
+                    self.expand_lines_into(
+                        out,
+                        body,
+                        &nested_args_map,
+                        depth + 1
+                    )?;
+                }
             }
-
-            let nested_args_map = HashMap::from_iter(
-                nested_def.params
-                    .iter()
-                    .map(AsRef::as_ref)
-                    .zip(nested_args.iter().map(AsRef::as_ref))
-            );
-
-            self.expand_lines_into(
-                out,
-                &nested_def.body,
-                &nested_args_map,
-                depth + 1
-            )?;
         }
 
         Ok(())
