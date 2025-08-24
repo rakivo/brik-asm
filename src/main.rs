@@ -37,7 +37,11 @@ mod mnemonic;
 mod assembler;
 
 #[derive(Debug, Parser)]
-#[command(version, about = "Single-pass RISC-V assembler")]
+#[command(
+    version,
+    about = "brik-asm: Single-pass High-performance RISC-V assembler",
+    arg_required_else_help = true
+)]
 struct Args {
     /// Input assembly file (UTF-8)
     #[arg(required = true)]
