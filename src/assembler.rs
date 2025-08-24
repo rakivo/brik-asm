@@ -1,6 +1,7 @@
 use crate::encoder::Encoder;
 use crate::error::prelude::*;
 use crate::mnemonic::Mnemonic;
+use crate::util::unescape_string;
 use crate::loc::{Loc, LocDisplay};
 use crate::fm::{BrikFile, FileId, FileManager};
 use crate::parse::{
@@ -498,7 +499,7 @@ impl<'a> Assembler<'a> {
                     b"data"   => self.enc.position_at_end(self.sections.data),
                     b"rodata" => self.enc.position_at_end(self.sections.rodata),
                     b"bss"    => self.enc.position_at_end(self.sections.bss),
-                    other      => _ = self.enc.add_section_at_end(
+                    other     => _ = self.enc.add_section_at_end(
                         StandardSegment::Data,
                         other,
                         SectionKind::Data
@@ -532,6 +533,27 @@ impl<'a> Assembler<'a> {
             b"space" => {
                 let count = self.parse_i::<u64>(rest)?;
                 self.enc.emit_zeroes(count as _);
+                self.enc.edit_curr_label_sym(|s| {
+                    s.kind = SymbolKind::Data;
+                });
+            }
+
+            b"string" => {
+                let (str, _) = take_string(rest);
+                let v = &str[1..str.len() - 1];
+                let v = unescape_string(v);
+                self.enc.emit_string(v);
+                self.enc.edit_curr_label_sym(|s| {
+                    s.kind = SymbolKind::Data;
+                });
+            }
+
+            b"stringz" => {
+                let (str, _) = take_string(rest);
+                let v = &str[1..str.len() - 1];
+                let v = unescape_string(v);
+                self.enc.emit_string(v);
+                self.enc.emit_byte(0);
                 self.enc.edit_curr_label_sym(|s| {
                     s.kind = SymbolKind::Data;
                 });
@@ -626,7 +648,6 @@ impl<'a> Assembler<'a> {
 
         let params = parts
             .map(|s| s.strip_prefix('$').unwrap_or(s))
-            .map(ToOwned::to_owned)
             .map(Into::into)
             .collect();
 

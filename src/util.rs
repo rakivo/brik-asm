@@ -1,3 +1,38 @@
+#[inline]
+pub fn unescape_string_(escaped: &str, ret: &mut String) {
+    let mut chars = escaped.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            ret.push(c);
+            continue
+        }
+
+        let Some(&next) = chars.peek() else {
+            ret.push(c);
+            continue
+        };
+
+        match next {
+            'n'  => { ret.push('\n'); chars.next(); },
+            't'  => { ret.push('\t'); chars.next(); },
+            'r'  => { ret.push('\r'); chars.next(); },
+            '\\' => { ret.push('\\'); chars.next(); },
+            '"'  => { ret.push('"');  chars.next(); },
+            '\'' => { ret.push('\''); chars.next(); },
+            '0'  => { ret.push('\0'); chars.next(); },
+            _ => ret.push(c)
+        }
+    }
+}
+
+#[inline]
+pub fn unescape_string(escaped: &str) -> String {
+    let mut ret = String::with_capacity(escaped.len());
+    unescape_string_(escaped, &mut ret);
+    ret
+}
+
 macro_rules! maybe_reloc {
     // rd + imm
     ($self:ident, $ctor:ident, rd=$rd:expr, imm=$imm:expr, kind=$kind:expr) => {{
