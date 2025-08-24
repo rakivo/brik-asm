@@ -13,5 +13,4 @@ main:
 
 .rodata
 msg:
-    .ascii "Hello from RISC-V!"
-    .byte 10, 0
+    .stringz "Hello from RISC-V!\n"
