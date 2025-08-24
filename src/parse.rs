@@ -1,4 +1,4 @@
-use std::{str, fmt, ptr, error};
+use std::{str, fmt, ptr};
 
 use brik::rv32::{Reg, AqRl};
 
@@ -717,33 +717,6 @@ pub fn parse_aqrl(operands: &str) -> Result<AqRl, encoder::EncoderError<'_>> {
         "aqrl" => AqRl::AcquireRelease,
         _ => return Err(encoder::EncoderError::InvalidAqrl(trimmed))
     })
-}
-
-#[inline]
-pub fn parsing_list<T>(input: &str, sepa: u8, mut f: impl FnMut(T)) -> Result<(), Box<str>>
-where
-    T: Num + str::FromStr,
-    <T as Num>::FromStrRadixErr: fmt::Display,
-    <T as str::FromStr>::Err: Send + Sync + fmt::Display + error::Error + 'static
-{
-    let bytes = input.as_bytes();
-
-    let mut byte_offset = 0;
-    while byte_offset < bytes.len() {
-        let end = memchr(sepa, &bytes[byte_offset..])
-            .map(|pos| byte_offset + pos)
-            .unwrap_or(bytes.len());
-
-        let item = input[byte_offset..end].trim();
-        if !item.is_empty() {
-            let val = parse_i(item)?;
-            f(val);
-        }
-
-        byte_offset = end + 1;
-    }
-
-    Ok(())
 }
 
 pub fn parse_reg(s: &str) -> Result<(Reg, &str), encoder::EncoderError<'_>> {

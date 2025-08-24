@@ -31,6 +31,7 @@ mod util;
 mod fm;
 mod loc;
 mod sym;
+mod error;
 mod parse;
 mod encoder;
 mod mnemonic;
