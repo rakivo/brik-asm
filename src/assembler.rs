@@ -364,7 +364,7 @@ impl<'a> Assembler<'a> {
                 // SAFETY: this loop is the only place
                 // in the program that mutates .curr_line
                 let self_ptr: *const Self = &self;
-                (&*self_ptr).curr_line.as_str()
+                (*self_ptr).curr_line.as_str()
             };
 
             let line = line.strip_suffix('\n').unwrap_or(line);
