@@ -12,6 +12,7 @@ use crate::parse::{
 
 use std::rc::Rc;
 use std::borrow::Cow;
+use std::{fmt, error};
 use std::ptr::NonNull;
 use std::{str, slice};
 use std::collections::HashMap;
@@ -45,7 +46,7 @@ pub struct Sections {
 struct MacroDef {
     params: Rc<[Box<str>]>,
     body: Rc<str>,
-    defined_at_line: u32,
+    src_loc: Loc
 }
 
 struct InputLine {
@@ -322,12 +323,70 @@ impl<'a> Assembler<'a> {
     }
 
     pub fn assemble(mut self) -> anyhow::Result<Object<'a>> {
+        use AssemblerErrorKind::*;
+
+        enum AssemblerErrorKind {
+            UnknownMnemonic,
+
+            EmptyLabel,
+
+            HandlingInstruction,
+            HandlingDirective,
+
+            ParsingMacro,
+            ExpandingMacro
+        }
+
+        struct AssemblerError<'a> {
+            loc: LocDisplay,
+            kind: AssemblerErrorKind,
+            src: Cow<'a, str>,
+            msg: Option<Cow<'a, str>>
+        }
+
+        impl error::Error for AssemblerError<'_> {}
+
+        impl fmt::Debug for AssemblerError<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                fmt::Display::fmt(self, f)
+            }
+        }
+
+        impl fmt::Display for AssemblerError<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let Self { loc, src, msg, kind } = self;
+
+                let prefix = match kind {
+                    UnknownMnemonic => "unknown mnemonic",
+
+                    EmptyLabel => "empty label",
+
+                    HandlingInstruction => "error handling instruction",
+                    HandlingDirective => "error handling directive",
+
+                    ParsingMacro => "error parsing macro",
+                    ExpandingMacro => "error expanding macro"
+                };
+
+                if let Some(msg) = msg {
+                    write!(f, "{loc}: {prefix}: {src:?}: {msg}")
+                } else {
+                    write!(f, "{loc}: {prefix}: {src:?}")
+                }
+            }
+        }
+
         self.enc.position_at_end(self.sections.text);
 
-        while let Some(line) = self.get_next_line() {
-            self.enc.loc = line.src_loc;
+        let mut src = String::new();
+        let mut msg = None;
 
-            let loc = line.src_loc.display(&self.file_manager);
+        let err = loop {
+            let Some(line) = self.get_next_line() else {
+                break None
+            };
+
+            self.enc.loc = line.src_loc;
 
             let line = line.as_str();
             let line = line.strip_suffix('\n').unwrap_or(line);
@@ -351,7 +410,8 @@ impl<'a> Assembler<'a> {
                 let lbl = &line[..line.len() - 1].trim();
 
                 if lbl.is_empty() {
-                    bail!("empty label")
+                    src = line.to_owned();
+                    break Some(EmptyLabel)
                 }
 
                 if let Some(sym_id) = self.enc.symbol_id(lbl.as_bytes()) {
@@ -370,50 +430,67 @@ impl<'a> Assembler<'a> {
                     SymbolScope::Compilation
                 );
 
-                // should we intern labels as well?
-                // self.enc.intern_label(lbl, lbl_id);
-
                 continue
             }
 
-            let fl_context = || format!("{loc}:");
-
             if first_byte == b'.' {
-                self.handle_directive(line)
-                    .with_context(fl_context)?;
+                if let Err(e) = self.handle_directive(line) {
+                    msg = Some(e.to_string());
+                    src = line.to_owned();
+                    break Some(HandlingDirective)
+                }
 
                 continue
             }
 
             if line_bytes.starts_with(b"macro ") {
-                self.handle_macro_definition(line)
-                    .with_context(fl_context)?;
+                if let Err(e) = self.handle_macro_definition(line) {
+                    msg = Some(e.to_string());
+                    src = line.to_owned();
+                    break Some(ParsingMacro)
+                }
 
                 continue
             }
 
             let (first_word, rest) = split_at_space(line);
             if self.macros.contains_key(first_word) {
-                self.call_macro(first_word, rest)
-                    .with_context(|| format!{
-                        "expanding macro: '{first_word}'"
-                    })?;
+                if let Err(e) = self.call_macro(first_word, rest) {
+                    msg = Some(e.to_string());
+                    src = line.to_owned();
+                    break Some(ExpandingMacro)
+                }
 
                 continue
             }
 
             let (mn, rest) = split_at_space(line);
-            let m = Mnemonic::try_from_str(mn)
-                .ok_or_else(|| anyhow::anyhow!("unknown mnemonic: {mn}"))
-                .with_context(fl_context)?;
+            let Some(m) = Mnemonic::try_from_str(mn) else {
+                src = line.to_owned();
+                break Some(UnknownMnemonic)
+            };
 
-            self.enc
-                .encode_inst(m, rest)
-                .map_err(|e| anyhow::anyhow!(e.to_string()))
-                .with_context(fl_context)?;
+            if let Err(e) = self.enc.encode_inst(m, rest) {
+                msg = Some(e.to_string());
+                src = line.to_owned();
+                break Some(HandlingInstruction)
+            }
+        };
+
+        let loc = self.loc_display();
+
+        if let Some(err) = err {
+            let err = AssemblerError {
+                loc: self.loc_display(),
+                src: src.into(),
+                msg: msg.map(Into::into),
+                kind: err,
+            };
+
+            bail!(err.to_string())
         }
 
-        let file_path = self.loc_display().file_path;
+        let file_path = &loc.file_path;
 
         self.enc
             .finish(&self.file_manager)
@@ -426,7 +503,7 @@ impl<'a> Assembler<'a> {
     fn handle_directive(
         &mut self,
         line: &str
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), Box<str>> {
         let line_bytes = line.as_bytes();
 
         // find space position once
@@ -442,9 +519,9 @@ impl<'a> Assembler<'a> {
             ""
         };
 
-        let next = || {
+        let next = || -> Result<&str, Box<str>> {
             if rest.is_empty() {
-                bail!("expected section name")
+                return Err("expected section name".into())
             }
 
             Ok(rest)
@@ -495,7 +572,7 @@ impl<'a> Assembler<'a> {
             }
 
             b"space" => {
-                let count = parse_i::<u64>(rest).map_err(|e| anyhow::anyhow!(e))?;
+                let count = parse_i::<u64>(rest)?;
                 self.enc.emit_zeroes(count as _);
                 self.enc.edit_curr_label_sym(|s| {
                     s.kind = SymbolKind::Data;
@@ -523,25 +600,25 @@ impl<'a> Assembler<'a> {
 
             b"byte" => {
                 self.enc.align_to(1);
-                parsing_list(rest, b' ', |v| _ = self.enc.emit_byte(v)).map_err(|e| anyhow::anyhow!(e))?;
+                parsing_list(rest, b' ', |v| _ = self.enc.emit_byte(v))?;
                 self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
             }
 
             b"hword" => {
                 self.enc.align_to(2);
-                parsing_list(rest, b' ', |v| _ = self.enc.emit_half(v)).map_err(|e| anyhow::anyhow!(e))?;
+                parsing_list(rest, b' ', |v| _ = self.enc.emit_half(v))?;
                 self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
             }
 
             b"word" => {
                 self.enc.align_to(4);
-                parsing_list(rest, b' ', |v| _ = self.enc.emit_word(v)).map_err(|e| anyhow::anyhow!(e))?;
+                parsing_list(rest, b' ', |v| _ = self.enc.emit_word(v))?;
                 self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
             }
 
             b"dword" => {
                 self.enc.align_to(8);
-                parsing_list(rest, b' ', |v| _ = self.enc.emit_dword(v)).map_err(|e| anyhow::anyhow!(e))?;
+                parsing_list(rest, b' ', |v| _ = self.enc.emit_dword(v))?;
                 self.enc.edit_curr_label_sym(|s| s.kind = SymbolKind::Data);
             }
 
@@ -551,13 +628,13 @@ impl<'a> Assembler<'a> {
                 let file_path = &file_path[1..file_path.len()-1];
 
                 if file_path.is_empty() {
-                    bail!("empty include file path")
+                    return Err("empty include file path".into())
                 }
 
                 if file_path == STANDARD_LIBRARY_FILE_PATH {
                     self.append_virtual(STANDARD_LIBRARY);
                 } else {
-                    self.append_input_file(file_path)?;
+                    self.append_input_file(file_path).map_err(|e| e.to_string())?;
                 }
             }
 
@@ -565,24 +642,26 @@ impl<'a> Assembler<'a> {
                 let dir_str = str::from_utf8(directive)
                     .unwrap_or("<invalid utf8>");
 
-                bail!("unknown directive .{dir_str}")
+                return Err(format!("unknown directive .{dir_str}").into())
             }
         }
 
         Ok(())
     }
 
-     fn handle_macro_definition(&mut self, line: &str) -> anyhow::Result<()> {
+     fn handle_macro_definition(&mut self, line: &str) -> Result<(), Box<str>> {
         // "macro name [..param] {"
-        let header = line
+        let Some(header) = line
             .strip_prefix("macro ")
             .and_then(|s| s.strip_suffix("{"))
-            .ok_or_else(|| anyhow::anyhow!("invalid macro header"))?;
+        else {
+            return Err("invalid macro header".into())
+        };
 
         let mut parts = header.split_whitespace();
 
         let Some(name) = parts.next() else {
-            bail!("macro name required");
+            return Err("macro name required".into())
         };
 
         let params = parts
@@ -612,7 +691,9 @@ impl<'a> Assembler<'a> {
         }
 
         if brace_count != 0 {
-            bail!("unclosed macro definition for '{name}'");
+            return Err(format!{
+                "unclosed macro definition for '{name}'"
+            }.into())
         }
 
         self.macros.insert(
@@ -620,14 +701,14 @@ impl<'a> Assembler<'a> {
             MacroDef {
                 params,
                 body: body.into(),
-                defined_at_line: self.enc.loc.line_number(),
+                src_loc: self.enc.loc,
             }
         );
 
         Ok(())
     }
 
-    fn call_macro(&mut self, name: &str, args_str: &str) -> anyhow::Result<()> {
+    fn call_macro(&mut self, name: &str, args_str: &str) -> Result<(), Box<str>> {
         let macro_def = self.macros.get(name).unwrap();
         let (params, body) = (
             Rc::clone(&macro_def.params),
@@ -639,18 +720,13 @@ impl<'a> Assembler<'a> {
             .collect::<Vec<_>>();
 
         if args.len() != params.len() {
-            let e0 = format!{
-                "macro '{name}' expects {a} arguments, got {b}",
+            let err = format!{
+                "expects {a} arguments, got {b}\nnote: defined here: {loc}",
                 a = params.len(),
-                b = args.len()
-            };
-
-            let e1 = format!{
-                "macro '{name}' defined here: {line}",
-                line = macro_def.defined_at_line
-            };
-
-            bail!("{e0}\n{e1}")
+                b = args.len(),
+                loc = macro_def.src_loc.display(&self.file_manager)
+            }.into();
+            return Err(err)
         }
 
         let expanded = self.expand_macro_body(&body, &params, &args)?;
@@ -671,7 +747,7 @@ impl<'a> Assembler<'a> {
         body: &str,
         params: &[Box<str>],
         args: &[&str]
-    ) -> anyhow::Result<Box<str>> {
+    ) -> Result<Box<str>, Box<str>> {
         let args_map = HashMap::from_iter(
             params
                 .iter()
@@ -695,9 +771,11 @@ impl<'a> Assembler<'a> {
         body: &str,
         args_map: &HashMap<&str, &str>,
         depth: usize,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), Box<str>> {
         if depth > MACRO_RECURSION_LIMIT {
-            bail!("macro recursion limit ({MACRO_RECURSION_LIMIT}) exceeded");
+            return Err(format!{
+                "macro recursion limit ({MACRO_RECURSION_LIMIT}) exceeded"
+            }.into())
         }
 
         let mut byte_offset = 0;
@@ -732,11 +810,11 @@ impl<'a> Assembler<'a> {
             };
 
             if nested_args.len() != nested_def.params.len() {
-                bail!{
+                return Err(format!{
                     "macro '{first_tok}' expects {a} arguments, got {b}",
                     a = nested_def.params.len(),
                     b = nested_args.len()
-                }
+                }.into())
             }
 
             let nested_args_map = HashMap::from_iter(
@@ -764,7 +842,7 @@ impl<'a> Assembler<'a> {
 fn substitute_params_in_line<'a>(
     line: &'a str,
     sub_map: &HashMap<&str, &str>
-) -> anyhow::Result<Cow<'a, str>> {
+) -> Result<Cow<'a, str>, Box<str>> {
     if bytecount::count(line.as_bytes(), b'$') == 0 {
         return Ok(line.into())
     }
@@ -794,7 +872,9 @@ fn substitute_params_in_line<'a>(
             } else if let Some(val) = sub_map.get(name) {
                 out.push_str(val);
             } else {
-                bail!("unknown macro param: {name}")
+                return Err(format!{
+                    "unknown macro param: {name}"
+                }.into())
             }
         } else {
             out.push(bytes[i] as char);
